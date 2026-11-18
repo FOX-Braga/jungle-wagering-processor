@@ -22,7 +22,7 @@ A configuração é validada antes de iniciar o HTTP. O driver inicializa de for
 | Camada         | Responsabilidade                                                      | Estado atual                                           |
 | -------------- | --------------------------------------------------------------------- | ------------------------------------------------------ |
 | Domain         | Entidades encapsuladas, agregados, objetos de valor, regras e eventos | Núcleo implementado e testado na Fase 2                |
-| Application    | Casos de uso, portas e escopo transacional                            | Contrato de identidade para a futura integração OIDC   |
+| Application    | Casos de uso, portas e escopo transacional                            | Motor financeiro, leituras e porta de identidade       |
 | Infrastructure | Configuração, persistência, mensageria, workers e observabilidade     | MikroORM, SQS, migrations, probes e logger estruturado |
 | Presentation   | Controllers, DTOs, filtros e API                                      | Health público e documentação OpenAPI                  |
 
@@ -30,23 +30,31 @@ As dependências apontam para o domínio e os casos de uso. Controllers adaptam 
 
 ## Decisões técnicas
 
-| Decisão                               | Motivação e trade-off                                                                                                                                                                                                                       |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bun 1.x e TypeScript estrito          | O runtime, gerenciador e test runner são comuns aos ambientes. A compilação usa `tsc` para checagem independente e emissão de decorators.                                                                                                   |
-| NestJS                                | Módulos, ciclo de vida e composição por injeção com uma API pequena. Domínio e casos de uso permanecem independentes dos decorators.                                                                                                        |
-| MikroORM                              | Unit of Work, contexto por requisição e EntityManager transacional. A separação entre entidade de domínio e persistência exige mapeamento explícito.                                                                                        |
-| PostgreSQL                            | Fonte de verdade e coordenação entre processos. Saldo, ledger, inbox e outbox terão um único commit por operação.                                                                                                                           |
-| Migrations reversíveis                | Histórico versionado e execução explícita. O provisionamento é controlado por um processo, separado das réplicas HTTP.                                                                                                                      |
-| MiniStack                             | Emulador sem dependência de licença paga. A compatibilidade necessária de FIFO, visibilidade e DLQ é verificada pela suíte real. [Documentação do MiniStack](https://github.com/ministackorg/ministack/tree/v1.5.38)                        |
-| Money com precisão exata              | Quantia em string decimal de duas casas na interface e centavos em `bigint` no domínio. PostgreSQL armazenará `NUMERIC` e o mapper reidratará a string sem conversão para ponto flutuante. A precisão máxima será definida junto do schema. |
-| Lock pessimista por wallet            | `SELECT … FOR UPDATE` serializa a movimentação da mesma carteira entre instâncias. Carteiras distintas avançam em paralelo. Uma carteira muito disputada tem fila de contenção. Timeouts e retries limitados ficam na aplicação.            |
-| Idempotência persistida               | Chave única, hash SHA-256 de JSON canônico dos campos de negócio e unicidade de provedor/ID externo. O resultado histórico é persistido para replay. O custo é manter os índices e o snapshot da resposta.                                  |
-| Inbox e outbox transacionais          | Inbox, resultado, alterações de saldo, ledger e eventos futuros partilham o commit. Ack vem depois do commit. A publicação exige um processo independente e pode repetir em caso de crash após envio.                                       |
-| HTTP e SQS compartilham o caso de uso | Os adaptadores convertem seus contratos para o mesmo comando. O domínio decide a regra uma vez e o PostgreSQL protege contra duplicatas intercanal.                                                                                         |
-| Eventos at-least-once                 | O publicador terá reservas expiradas recuperáveis, backoff e `eventId` persistido. O consumidor pode deduplicar usando o ID estável.                                                                                                        |
-| Identidade externa                    | A fase deixa o contrato `ProviderIdentityPort`. Um futuro guard HTTP validará assinatura, emissor, público e expiração com um IdP OIDC, e vinculará a identidade autenticada ao provedor. Health é público.                                 |
+| Decisão                               | Motivação e trade-off                                                                                                                                                                                                                               |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bun 1.x e TypeScript estrito          | O runtime, gerenciador e test runner são comuns aos ambientes. A compilação usa `tsc` para checagem independente e emissão de decorators.                                                                                                           |
+| NestJS                                | Módulos, ciclo de vida e composição por injeção com uma API pequena. Domínio e casos de uso permanecem independentes dos decorators.                                                                                                                |
+| MikroORM                              | Unit of Work, contexto por requisição e EntityManager transacional. A separação entre entidade de domínio e persistência exige mapeamento explícito.                                                                                                |
+| PostgreSQL                            | Fonte de verdade e coordenação entre processos. Saldo, ledger, inbox e outbox compartilham o commit da operação.                                                                                                                                    |
+| Migrations reversíveis                | Histórico versionado e execução explícita. O provisionamento é controlado por um processo, separado das réplicas HTTP.                                                                                                                              |
+| MiniStack                             | Emulador sem dependência de licença paga. A compatibilidade necessária de FIFO, visibilidade e DLQ é verificada pela suíte real. [Documentação do MiniStack](https://github.com/ministackorg/ministack/tree/v1.5.38)                                |
+| Money com precisão exata              | Quantia em string decimal de duas casas na interface e centavos em `bigint` no domínio. PostgreSQL armazena em um domínio sobre `NUMERIC`, com até 36 dígitos inteiros e 2 fracionários. O mapper reidrata a string decimal exata.                  |
+| Lock pessimista por wallet            | `SELECT … FOR UPDATE` serializa a movimentação da mesma carteira entre instâncias. Carteiras distintas avançam em paralelo. Uma carteira muito disputada tem fila de contenção. O chamador recebe falhas tipadas de contenção para decidir o retry. |
+| Idempotência persistida               | Chave única, hash SHA-256 de JSON canônico dos campos de negócio e unicidade de provedor/ID externo. O resultado histórico é persistido para replay. O custo é manter os índices e o snapshot da resposta.                                          |
+| Inbox e outbox transacionais          | Inbox, resultado, alterações de saldo, ledger e eventos partilham o commit. Ack vem depois do commit. A publicação exige um processo independente e pode repetir em caso de crash após envio.                                                       |
+| HTTP e SQS compartilham o caso de uso | Os adaptadores convertem seus contratos para o mesmo comando. O domínio decide a regra uma vez e o PostgreSQL protege contra duplicatas intercanal.                                                                                                 |
+| Eventos at-least-once                 | O publicador terá reservas expiradas recuperáveis, backoff e `eventId` persistido. O consumidor pode deduplicar usando o ID estável.                                                                                                                |
+| Identidade externa                    | A fase deixa o contrato `ProviderIdentityPort`. Um futuro guard HTTP validará assinatura, emissor, público e expiração com um IdP OIDC, e vinculará a identidade autenticada ao provedor. Health é público.                                         |
 
-## Fluxo financeiro previsto para as próximas etapas
+## Persistência disponível na Fase 3
+
+Entidades ORM e mappers separados reidratam as cinco entidades de domínio. `TransactionManager` compartilha um EntityManager transacional, usa `READ COMMITTED` e fornece lock por carteira, timeout e erros de contenção identificáveis. A outbox já oferece seleção de eventos devidos e leases com `SKIP LOCKED`. O [schema financeiro](docs/DATABASE_SCHEMA.md) detalha constraints, índices, roles e reversões de migrations.
+
+## Motor financeiro da Fase 4
+
+A abertura e as operações de aposta usam portas independentes de transporte. A aplicação canonicaliza o comando, resolve replay e conflitos, bloqueia a carteira e delega a decisão ao domínio. O adaptador PostgreSQL grava snapshot, movimento, outbox e inbox aplicável no mesmo commit. As consultas usam IDs internos, identidade do provedor e cursor de ledger. A documentação do motor descreve as sequências e a retomada de referências. [Motor financeiro](docs/FINANCIAL_PROCESSING.md)
+
+## Integração prevista com adaptadores HTTP e SQS
 
 ```mermaid
 sequenceDiagram
@@ -66,7 +74,7 @@ sequenceDiagram
     Pub->>Db: Confirma publicação
 ```
 
-O schema futuro protegerá unicidade de carteira por jogador e moeda, transação externa por provedor, chave idempotente, inbox por consumidor e ID, ledger por transação e carteira e reversões aplicadas. Um lançamento deverá ser a via autorizada para atualizar saldo e versão materializados. O PostgreSQL validará saldo anterior, direção, valor e saldo posterior, com proteção de imutabilidade e não negatividade. A reconciliação comparará saldo armazenado e soma do ledger em um mesmo snapshot.
+O schema da Fase 3 protege unicidade de carteira por jogador e moeda, transação externa por provedor, chave idempotente global, inbox por consumidor e ID, ledger por transação e carteira e reversões aplicadas. O lançamento é a via autorizada para atualizar saldo e versão materializados. O PostgreSQL valida saldo anterior, direção, valor e saldo posterior, com proteção de imutabilidade e não negatividade. A auditoria compara saldo armazenado e soma do ledger no mesmo snapshot.
 
 ### Contratos financeiros da Fase 2
 

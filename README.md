@@ -1,6 +1,6 @@
 # Jungle Wagering Processor
 
-Fundação do desafio técnico da Jungle Gaming para processamento distribuído de apostas. A Fase 1 entrega uma API de health, configuração validada, migrations, PostgreSQL e SQS local reproduzíveis. A Fase 2 implementa o [domínio financeiro](docs/DOMAIN_MODEL.md) com aritmética exata, ledger e eventos. O [enunciado original](docs/challenge/README.original.md), a [arquitetura](ARCHITECTURE.md), a [matriz de requisitos](docs/REQUIREMENTS_MATRIX.md) e o [plano de testes](docs/TEST_PLAN.md) estão no repositório.
+Fundação do desafio técnico da Jungle Gaming para processamento distribuído de apostas. A Fase 1 entrega uma API de health, configuração validada, migrations, PostgreSQL e SQS local reproduzíveis. A Fase 2 implementa o [domínio financeiro](docs/DOMAIN_MODEL.md) com aritmética exata, ledger e eventos. A Fase 3 adiciona o [schema financeiro](docs/DATABASE_SCHEMA.md), repositórios MikroORM e proteção SQL do ledger. O [enunciado original](docs/challenge/README.original.md), a [arquitetura](ARCHITECTURE.md), a [matriz de requisitos](docs/REQUIREMENTS_MATRIX.md) e o [plano de testes](docs/TEST_PLAN.md) estão no repositório.
 
 ## Stack
 
@@ -58,13 +58,14 @@ O serviço `setup` deve terminar com código `0`. A API roda com o usuário `bun
 
 ## Ambiente
 
-Os scripts carregam a configuração padrão de `.env.example`. Crie um `.env` local para sobrescrever apenas as variáveis necessárias. Valores exportados na sessão prevalecem. Os testes de integração adicionam `.env.test` para estabelecer o modo de teste e o nível de log. Use os exemplos como credenciais descartáveis exclusivas de desenvolvimento.
+Os scripts carregam a configuração padrão de `.env.example`. Crie um `.env` local para sobrescrever apenas as variáveis necessárias. Valores exportados na sessão prevalecem. A integração carrega `.env.example` e `.env.test`, e usa `TEST_DATABASE_URL` como conexão de manutenção para os bancos descartáveis. Use os exemplos como credenciais descartáveis exclusivas de desenvolvimento.
 
 | Variável                                                             | Uso                                                                                                  |
 | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `NODE_ENV`, `PORT`, `LOG_LEVEL`                                      | Ambiente, porta HTTP do host e nível de log estruturado                                              |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT` | Inicialização do container e porta publicada                                                         |
 | `DATABASE_URL`                                                       | DSN da API e dos scripts no host. Padrão em `127.0.0.1:5434`.                                        |
+| `TEST_DATABASE_URL`                                                  | Conexão de manutenção dos testes SQL, apontada para o Compose na porta `5434`.                       |
 | `DATABASE_URL_DOCKER`                                                | Sobrescrita opcional do DSN usado pelos containers. Padrão com serviço `postgres:5432`.              |
 | `SQS_PORT`, `SQS_ENDPOINT`                                           | Porta publicada e endpoint do host. Padrão em `127.0.0.1:4567`. Internamente Compose usa `sqs:4566`. |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`           | Região e credenciais locais. O identificador numérico de 12 dígitos é a conta do MiniStack.          |
@@ -74,14 +75,14 @@ Ao trocar a porta publicada do PostgreSQL, ajuste `DATABASE_URL`. Ao trocar port
 
 ## PostgreSQL e migrations
 
-A primeira migration cria o schema `wagering`. O histórico do MikroORM fica em `public.mikro_orm_migrations`. A API usa conexão preguiçosa e o bootstrap aplica as migrations em processo separado. Os arquivos versionados ficam em `src/infrastructure/persistence/migrations`.
+A migration inicial cria o schema `wagering`. As migrations financeiras criam tabelas, índices, constraints e triggers de integridade. A migration da Fase 4 acrescenta snapshots de referências pendentes e preserva a moeda original de comandos rejeitados por divergência. O histórico fica em `public.mikro_orm_migrations`. O comando de migration usa `DATABASE_URL`, incluindo o valor de `.env` quando configurado. Se você usa pgAdmin com `jungle_db`, abra **Schemas → wagering → Tables** e atualize a árvore depois do `up`.
 
 ```powershell
-bun run migration:status
-bun run migration:up
+bun run db:migrate
+bun run db:migrate:status
 ```
 
-`bun run migration:down` reverte a última migration. Use uma conexão para banco descartável ao validar reversões. A suíte de integração faz o ciclo `up → down → up` em banco temporário e verifica tanto o schema quanto o histórico.
+`bun run db:migrate:down` reverte a última migration em um banco vazio. O rollback é bloqueado quando removeria proteções financeiras em uso ou descartaria dados. A suíte isolada faz o ciclo `up → down → up` e compara o catálogo do PostgreSQL antes e depois.
 
 ## SQS local
 
@@ -104,12 +105,30 @@ bun run format:check
 bun run build
 bun run test:unit
 bun run test:properties
-bun run infra:setup
-bun run doctor
+```
+
+Para rodar a integração completa, prepare os serviços descartáveis com os valores de `.env.example`.
+
+```powershell
+docker compose --env-file .env.example up -d --wait postgres sqs
+bun --env-file=.env.example scripts/bootstrap/infra.ts provision
 bun run test:integration
 ```
 
-A integração exige PostgreSQL e MiniStack reais e a configuração local do Compose. O usuário de teste precisa criar bancos descartáveis. Os testes aguardam condições observáveis, limpam os recursos temporários e exercitam indisponibilidade por links TCP isolados que encaminham para os containers reais.
+`provision` aplica as migrations e garante as filas de teste. `TEST_DATABASE_URL` identifica o PostgreSQL isolado na porta `5434`, e a conta deve ter permissão para criar bancos descartáveis. A suíte de persistência cria e limpa bancos com nomes gerados. Os testes de regressão usam PostgreSQL e MiniStack reais.
+
+Para executar uma parte isoladamente:
+
+```powershell
+bun run test:db:constraints
+bun run test:db:transactions
+bun run test:db:migrations
+bun run test:financial
+bun run test:concurrency
+bun run test:atomicity
+```
+
+As três suítes da Fase 4 também fazem parte de `test:integration`. Elas executam os casos de uso contra PostgreSQL real, incluindo replay após reconexão, concorrência e falhas antes do commit. Os endpoints financeiros serão integrados na Fase 5. [Motor financeiro](docs/FINANCIAL_PROCESSING.md)
 
 ## Troubleshooting
 

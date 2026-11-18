@@ -17,17 +17,14 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { createOrmOptions } from "../../mikro-orm.config";
 import { AppModule } from "../../src/app.module";
-import {
-  loadEnvironment,
-  WAGER_DLQ_NAME,
-  WAGER_QUEUE_NAME,
-} from "../../src/infrastructure/config/environment";
+import { WAGER_DLQ_NAME, WAGER_QUEUE_NAME } from "../../src/infrastructure/config/environment";
 import { createSqsClient } from "../../src/infrastructure/messaging/sqs-client";
 import { checkPostgres } from "../../src/infrastructure/persistence/postgres-probe";
 import { createDependencyLink } from "../helpers/dependency-link";
+import { loadIntegrationConfig } from "../helpers/test-database";
 import { waitFor } from "../helpers/wait-for";
 
-const config = loadEnvironment();
+const config = loadIntegrationConfig();
 const requestDeadline = () => ({ abortSignal: AbortSignal.timeout(4_000) });
 const baseline = "Migration20261118000000";
 let orm: MikroORM;
@@ -111,7 +108,7 @@ describe("PostgreSQL e MikroORM", () => {
       expect(await schemaExists()).toBe(true);
       expect((await migrator.getExecutedMigrations()).map(({ name }) => name)).toContain(baseline);
 
-      await migrator.down();
+      await migrator.down({ to: 0 });
       expect(await schemaExists()).toBe(false);
       expect(await migrator.getExecutedMigrations()).toEqual([]);
 

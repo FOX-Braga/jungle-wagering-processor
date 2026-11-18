@@ -42,6 +42,32 @@ A referência é o [README original do desafio](challenge/README.original.md). A
 | M01–M02 | Parcial                      | Inbox, outbox, backoff e envelopes implementados e testados. Ack, deduplicação persistente e commit financeiro serão integrados depois.                |
 | T01     | Parcial                      | Testes unitários, 10 propriedades e cenários de negócio em memória. Concorrência e recuperação financeiras ainda dependem dos fluxos distribuídos.     |
 
+## Situação ao fim da Fase 3
+
+| ID      | Status atual                      | Evidência e escopo                                                                                                                                                     |
+| ------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D01     | Domínio e mapeamento verificados  | Roundtrip NUMERIC/Money com precisão máxima e rejeição SQL de escala, faixa e não finitos.                                                                             |
+| D02–D04 | Schema e repositórios verificados | Saldo projetado pelo ledger, abertura versão 1, FKs compostas, constraints diferíveis e triggers append-only.                                                          |
+| D05     | Proteção persistente verificada   | Validação de referência, índice parcial de reversão processada e testes SQL de duplicidade.                                                                            |
+| D06     | Base de persistência verificada   | Busca indexada por referência pendente. Backoff e worker de referências são etapas futuras.                                                                            |
+| C01     | Lock local verificado             | Três conexões reais, serialização por carteira, timeout e liberação após commit e rollback. O cenário de três instâncias completas pertence às fases de processamento. |
+| I01     | Base persistente verificada       | Chave global, unicidade por provedor e ID externo, hash e snapshot do resultado. Replay nas entradas ainda será integrado.                                             |
+| M01–M03 | Base persistente verificada       | Inbox composta, outbox JSONB, tentativa, data de publicação e reservas. Consumidor, publicador e entrega distribuída são etapas futuras.                               |
+| A03     | Auditoria interna verificada      | Soma exata em um snapshot e comparação com saldo armazenado. O endpoint será implementado depois.                                                                      |
+| T01     | Integração SQL verificada         | Constraints diretas, atomicidade, up/down/up, permissões restritas e testes de locking.                                                                                |
+
+## Situação ao fim da Fase 4
+
+| ID      | Status atual                                 | Evidência e escopo                                                                                                                                                |
+| ------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D01–D04 | Motor financeiro verificado                  | Abertura positiva atômica, BET, WIN, LOSS, snapshots e reconciliação exata no PostgreSQL.                                                                         |
+| D05–D06 | Reversão e retomada verificadas              | Validação de referência, concorrência entre reversões, pendência persistida e retomada pelo mesmo ID. Agendamento e prazo ficam para o worker.                    |
+| A01–A03 | Casos de uso e auditoria verificados         | Abertura, saldo atual, ledger paginado, consulta por ID interno e por provedor, mais reconciliação persistente. A exposição HTTP fica para a Fase 5.              |
+| C01     | Concorrência em banco verificada             | 50 cópias, BETs concorrentes, WINs, reversões, retomadas, carteiras independentes, timeout e deadlock. A prova multiprocesso fica para a Fase 5.                  |
+| I01     | Idempotência de aplicação verificada         | SHA-256 canônico, colisões tipadas, replay histórico após reconexão e conflito simultâneo entre carteiras.                                                        |
+| M01–M03 | Inbox e outbox financeiras verificadas       | Recibo e eventos no mesmo commit, replay sem duplicação de eventos e rollback após colisão SQL da outbox. Entrega e publicação ficam para as fases de mensageria. |
+| T01     | Casos de uso exercitados com PostgreSQL real | Integração, injeção de falhas, concorrência e sequências geradas com auditoria de saldo após cada comando.                                                        |
+
 ## Falhas eliminatórias
 
 | Falha                                                | Requisito     | Evidência prevista                                              |
