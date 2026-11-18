@@ -1,0 +1,22 @@
+$kind: http-request
+url: "{{base_url}}/health/live"
+method: GET
+scripts:
+  - type: afterResponse
+    code: "pm.test(\"Health Live - HTTP 200\", () => {\r
+
+      \  pm.response.to.have.status(200);\r
+
+      });\r
+
+      \r
+
+      pm.test(\"Health Live - status ok\", () => {\r
+
+      \  const body = pm.response.json();\r
+
+      \  pm.expect(body.status).to.equal(\"ok\");\r
+
+      });"
+    language: text/javascript
+order: 2000

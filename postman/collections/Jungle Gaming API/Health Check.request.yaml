@@ -1,0 +1,44 @@
+$kind: http-request
+url: "{{base_url}}/health/ready"
+method: GET
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: "pm.test(\"Health Ready - HTTP 200\", () => {\r
+
+      \  pm.response.to.have.status(200);\r
+
+      });\r
+
+      \r
+
+      pm.test(\"Health Ready - status ok\", () => {\r
+
+      \  const body = pm.response.json();\r
+
+      \  pm.expect(body.status).to.equal(\"ok\");\r
+
+      });\r
+
+      \r
+
+      pm.test(\"PostgreSQL está UP\", () => {\r
+
+      \  const body = pm.response.json();\r
+
+      \  pm.expect(body.checks.postgres).to.equal(\"up\");\r
+
+      });\r
+
+      \r
+
+      pm.test(\"SQS está UP\", () => {\r
+
+      \  const body = pm.response.json();\r
+
+      \  pm.expect(body.checks.sqs).to.equal(\"up\");\r
+
+      });"
+    language: text/javascript
+order: 1000

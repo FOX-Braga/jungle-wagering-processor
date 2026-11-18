@@ -1,0 +1,6 @@
+name: Jungle - Local
+values:
+  - key: base_url
+    value: ''
+  - key: access_token
+    value: ''

@@ -1,0 +1,101 @@
+name: jungle-wagering-phase1
+
+x-app-environment: &app-environment
+  NODE_ENV: production
+  PORT: "3000"
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://${POSTGRES_USER:-jungle}:${POSTGRES_PASSWORD:-jungle_dev}@postgres:5432/${POSTGRES_DB:-jungle}}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-000000000000}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-local-dev}
+  SQS_ENDPOINT: http://sqs:4566
+  SQS_WAGER_QUEUE_URL: http://sqs:4566/${AWS_ACCESS_KEY_ID:-000000000000}/wager-transactions.fifo
+  SQS_WAGER_DLQ_URL: http://sqs:4566/${AWS_ACCESS_KEY_ID:-000000000000}/wager-transactions-dlq.fifo
+
+x-app: &app
+  image: jungle-wagering-processor:0.1.0
+  build: .
+  environment: *app-environment
+  networks: [backend]
+
+services:
+  postgres:
+    image: postgres:16.11-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jungle}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jungle_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-jungle}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  sqs:
+    image: ministackorg/ministack:1.5.38
+    environment:
+      MINISTACK_REGION: ${AWS_REGION:-us-east-1}
+      MINISTACK_ACCOUNT_ID: ${AWS_ACCESS_KEY_ID:-000000000000}
+      PERSIST_STATE: "1"
+      STATE_DIR: /var/lib/ministack
+    ports:
+      - "127.0.0.1:${SQS_PORT:-4567}:4566"
+    volumes:
+      - sqs_data:/var/lib/ministack
+    networks: [backend]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:4566/_ministack/health', timeout=2).close()",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  setup:
+    <<: *app
+    command: ["bun", "--no-env-file", "dist/scripts/bootstrap/infra.js", "provision"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sqs:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    init: true
+    ports:
+      - "127.0.0.1:${PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sqs:
+        condition: service_healthy
+      setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "const r = await fetch('http://127.0.0.1:3000/health/ready'); process.exit(r.ok ? 0 : 1)",
+        ]
+      interval: 5s
+      timeout: 4s
+      retries: 15
+
+networks:
+  backend:
+
+volumes:
+  postgres_data:
+  sqs_data:
