@@ -1,0 +1,30 @@
+{
+  "status": "FAIL",
+  "mode": "verify",
+  "commit": "6c68af4dafb88775932345ed29f797ee8b376217",
+  "project": "jungle-phase9-5ac9c453-d48",
+  "platform": "win32",
+  "versions": {
+    "bun": "1.4.4",
+    "compose": "5.7.0"
+  },
+  "seconds": 0.4770171,
+  "failure": "docker-engine",
+  "steps": [
+    {
+      "step": "revision",
+      "exitCode": 0,
+      "seconds": 0.103138
+    },
+    {
+      "step": "compose-version",
+      "exitCode": 0,
+      "seconds": 0.29545950000000004
+    },
+    {
+      "step": "docker-engine",
+      "exitCode": 1,
+      "seconds": 0.07756940000000002
+    }
+  ]
+}

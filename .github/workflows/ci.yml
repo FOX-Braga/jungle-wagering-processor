@@ -17,26 +17,63 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      PHASE9_EVIDENCE_DIR: ${{ runner.temp }}/jungle-evidence
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
-      - run: bun install --frozen-lockfile
-      - run: bun run lint
-      - run: bun run typecheck
-      - run: bun run format:check
-      - run: bun run infra:setup
-      - run: bun run doctor
-      - run: bun run test:all
+      - id: install
+        run: bun install --frozen-lockfile
+      - id: lint
+        run: bun run lint
+      - id: types
+        run: bun run typecheck
+      - id: format
+        run: bun run format:check
+      - id: regression
+        run: bun run verify:evidence
       - if: github.event_name == 'workflow_dispatch' && inputs.run_load
-        run: bun run test:load > load-results.json
-      - if: github.event_name == 'workflow_dispatch' && inputs.run_load
+        id: benchmark
+        run: bun --no-env-file scripts/validation/phase9.ts load
+      - name: Summarize verification
+        if: always()
+        env:
+          INSTALL: ${{ steps.install.outcome }}
+          LINT: ${{ steps.lint.outcome }}
+          TYPES: ${{ steps.types.outcome }}
+          FORMAT: ${{ steps.format.outcome }}
+          REGRESSION: ${{ steps.regression.outcome }}
+          BENCHMARK: ${{ steps.benchmark.outcome }}
+        run: |
+          mkdir -p "$PHASE9_EVIDENCE_DIR"
+          report="$PHASE9_EVIDENCE_DIR/summary.md"
+          {
+            printf '## Verification of `%s`\n\n' "$GITHUB_SHA"
+            printf '| Check | Outcome |\n| --- | --- |\n'
+            printf '| Frozen install | %s |\n| Lint | %s |\n| Typecheck | %s |\n| Formatting | %s |\n| Regression | %s |\n| Benchmark | %s |\n' \
+              "$INSTALL" "$LINT" "$TYPES" "$FORMAT" "$REGRESSION" "$BENCHMARK"
+            if [ -f "$PHASE9_EVIDENCE_DIR/verify.json" ]; then
+              bun --no-env-file -e '
+                const { versions, tests, seconds, failure } = await Bun.file(process.argv[1]).json();
+                console.log(`\n- Bun ${versions.bun}, Compose ${versions.compose ?? "unavailable"}, Docker ${versions.docker ?? "unavailable"}.`);
+                console.log(`- Duration ${Math.round(seconds)} s.`);
+                console.log(`- Failure stage ${failure ?? "none"}.`);
+                if (tests) {
+                  const { passed, failed, skipped, runnerErrors } = tests;
+                  console.log(`- Tests ${passed} passed, ${failed} failed, ${skipped} skipped, ${runnerErrors} runner errors.`);
+                } else {
+                  console.log("- Tests have no results.");
+                }
+              ' "$PHASE9_EVIDENCE_DIR/verify.json"
+            fi
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish verification evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: load-results
-          path: load-results.json
-      - if: failure()
-        run: docker compose --env-file .env.example logs --no-color
-      - if: always()
-        run: docker compose --env-file .env.example down --volumes
+          name: verification-evidence
+          path: ${{ runner.temp }}/jungle-evidence/
+          if-no-files-found: error

@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "environment": { "bun": "1.4.4", "os": "Windows 10 Home", "arch": "x64", "apiProcesses": 3 },
+  "configuredSeconds": 12,
+  "measuredHttpSeconds": 11.5868367,
+  "http": {
+    "operations": 121,
+    "throughputPerSecond": 10.44288472625147,
+    "latencyMs": { "p50": 36.88, "p95": 70.66, "p99": 151.03 },
+    "businessRejections": 24,
+    "replays": 48
+  },
+  "sqs": {
+    "operations": 2,
+    "latencyMs": { "p50": 3026.67, "p95": 3237.46, "p99": 3237.46 },
+    "retries": 1,
+    "redeliveryAttempt": 2,
+    "unpublishedAtRestart": 4,
+    "httpCommitsWhileWorkersOffline": 1
+  },
+  "unexpectedErrors": 0,
+  "pending": { "outbox": 0, "references": 0, "inbox": 0 },
+  "audit": { "walletsChecked": 26, "inconsistent": 0, "ledgerEntriesChecked": "77" }
+}

@@ -1,13 +1,15 @@
 # Runbook operacional
 
+Para iniciar uma validação pós-deploy, siga o [guia de implantação](DEPLOYMENT.md#conferir-o-ambiente). Os exemplos Compose deste runbook usam o projeto padrão. Para um projeto nomeado, repita o `-p` e os mesmos arquivos `--env-file` utilizados na inicialização.
+
 ## Primeiros comandos
 
 ```powershell
 bun run doctor
 bun run diagnostics:operations
 bun run queues:inspect
-docker compose --profile workers ps
-docker compose --profile workers logs --since 10m api consumer outbox references
+docker compose --env-file .env.example --profile workers ps -a
+docker compose --env-file .env.example --profile workers logs --since 10m setup api consumer outbox references
 Invoke-RestMethod http://127.0.0.1:3000/health/live
 Invoke-RestMethod http://127.0.0.1:3000/health/ready
 ```
@@ -16,7 +18,7 @@ Use a mesma janela UTC, ambiente e `instanceId` ao comparar logs e métricas. Co
 
 ## Consumer SQS local
 
-Execute `bun run infra:setup` para aplicar migrations, provisionar as filas e conferir os atributos. Em outro terminal, execute `bun run worker:consumer`. Use Ctrl+C no processo local ou `docker compose --profile workers stop consumer` para aguardar a drenagem.
+Execute `bun run infra:setup` para aplicar migrations, provisionar as filas e conferir os atributos. Em outro terminal, execute `bun run worker:consumer`. Use Ctrl+C no processo local ou `docker compose --env-file .env.example --profile workers stop consumer` para aguardar a drenagem.
 
 Para publicar manualmente, crie uma carteira pela API e salve o envelope da [arquitetura de mensageria](MESSAGING_ARCHITECTURE.md#contrato-de-entrada) em `wager-request.json`. Preencha `walletId` e `playerId` com os dados da carteira e escolha IDs de mensagem e operação inéditos. Os comandos a seguir usam o MiniStack local padrão.
 
@@ -63,7 +65,7 @@ flowchart LR
 
 1. Compare lag, quantidade elegível, claims ativos, expirados e estacionados com o último ciclo do publisher.
 2. Consulte os eventos mais antigos com a query abaixo, usando acesso de leitura. Correlacione `eventId` com logs de envio e erros SQS.
-3. Restaure acesso ao SQS ou reinicie somente o publisher com `docker compose --profile workers restart outbox`. Aguarde a expiração de leases de instâncias que saíram.
+3. Restaure acesso ao SQS ou reinicie somente o publisher com `docker compose --env-file .env.example --profile workers restart outbox`. Aguarde a expiração de leases de instâncias que saíram.
 4. Confirme publicação e redução do lag. Para estacionamento, use a reativação seletiva revisada em [Cenários de falha](FAILURE_SCENARIOS.md). Preserve o mesmo evento e a deduplicação downstream.
 
 ```sql

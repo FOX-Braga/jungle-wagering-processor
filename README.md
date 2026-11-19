@@ -2,22 +2,21 @@
 
 Processador financeiro distribuído do desafio técnico da Jungle Gaming. A API REST e o consumer SQS compartilham o motor financeiro. PostgreSQL protege o saldo exato, o ledger imutável e a idempotência entre processos e canais. A Inbox protege o efeito financeiro após redelivery. A Outbox publica eventos confirmados com entrega at-least-once. [Enunciado original](docs/challenge/README.original.md) · [Arquitetura](ARCHITECTURE.md) · [Matriz final](docs/FINAL_REQUIREMENTS_MATRIX.md) · [Relatório final](docs/FINAL_TEST_REPORT.md)
 
+## Implantação
+
+O caminho verificado para avaliação usa Docker Compose em um host isolado. O guia cobre configuração, verificação pós-deploy, operação e recuperação de uma versão. Também registra os requisitos para um ambiente privado com PostgreSQL gerenciado e Amazon SQS. [Guia de implantação](docs/DEPLOYMENT.md) · [Runbook](docs/OPERATIONS_RUNBOOK.md)
+
 ## Roteiro de avaliação
 
-Com Bun e Docker no `PATH`, execute na raiz do projeto. O Compose usa as portas locais 3000, 5434 e 4567. pgAdmin, Postman e AWS CLI são opcionais.
+Com Bun e Docker no `PATH`, execute na raiz do projeto.
 
 ```powershell
 bun install --frozen-lockfile
-docker compose --env-file .env.example --profile workers up -d --build --wait
-bun run demo:financial
-bun run test:all
-bun run demo:inbox
-bun run test:load
+bun run demo:complete
+bun run verify:evidence
 ```
 
-A demo financeira confere as seis operações, o saldo histórico e cinco lançamentos. A regressão inclui três APIs e três consumers independentes, 50 chamadas idênticas, duas BET disputando saldo e falhas controladas. A demo da Inbox reproduz o crash depois do commit e antes do ACK. O benchmark executa oito cenários e encerra com auditoria de saldo e ledger. [Roteiro técnico](docs/TECHNICAL_PRESENTATION.md) · [Resultados de carga](docs/LOAD_TEST_REPORT.md) · [Checklist eliminatório](docs/ELIMINATORY_CHECKLIST.md)
-
-Use `bun run infra:down` para finalizar o Compose preservando volumes locais. Os testes e a carga usam bancos e filas descartáveis. A API de avaliação opera em rede local com a extensão OIDC documentada. O ensaio SQS usa MiniStack. [Runbook](docs/OPERATIONS_RUNBOOK.md) · [Revisão de segurança](docs/SECURITY_REVIEW.md)
+A demo valida abertura, concorrência, replay, reversões, crash após commit e reconciliação. A regressão cobre três APIs, três consumers, 50 chamadas idênticas e falhas controladas. Ambos os comandos criam projetos Compose descartáveis com portas dinâmicas. [Evidências para a banca](docs/EVALUATION_EVIDENCE.md) · [Roteiro técnico](docs/TECHNICAL_PRESENTATION.md) · [Resultados de carga](docs/LOAD_TEST_REPORT.md)
 
 ## Stack
 
@@ -88,7 +87,7 @@ docker compose --env-file .env.example --profile workers up -d --build --wait
 docker compose --env-file .env.example --profile workers ps -a
 ```
 
-O serviço `setup` deve terminar com código `0`. A API roda com o usuário `bun` e fica acessível nas mesmas rotas. Use uma única forma de execução da API por vez para evitar disputa da porta 3000. Com personalizações em `.env`, acrescente `--env-file .env` depois de `--env-file .env.example` nos comandos do Compose. Com `docker compose --env-file .env.example down`, os volumes continuam disponíveis para a próxima inicialização.
+O serviço `setup` deve terminar com código `0`. A API roda com o usuário `bun` e publica `/health/live`, `/health/ready` e as rotas financeiras no loopback. Swagger está disponível na execução de desenvolvimento. Use uma única API na porta 3000. Com personalizações em `.env`, acrescente `--env-file .env` depois de `--env-file .env.example` nos comandos do Compose. `bun run infra:down` encerra o projeto padrão preservando os volumes. [Validação pós-deploy](docs/DEPLOYMENT.md#conferir-o-ambiente)
 
 ## Ambiente
 
@@ -112,7 +111,7 @@ Ao trocar a porta publicada do PostgreSQL, ajuste `DATABASE_URL`. Ao trocar port
 
 ## API financeira e Postman
 
-Com a API local em execução, abra `http://127.0.0.1:3000/docs` para o Swagger ou importe a coleção e selecione o ambiente local no Postman. A coleção abre uma carteira, demonstra o replay histórico, executa reversões e termina com reconciliação. [Contrato HTTP](docs/API_CONTRACT.md) · [Guia do Postman](docs/POSTMAN_GUIDE.md)
+Com `bun run start:dev`, abra `http://127.0.0.1:3000/docs` para o Swagger. A coleção Postman funciona tanto com a API de desenvolvimento quanto com a API do Compose. Ela abre uma carteira, demonstra o replay histórico, executa reversões e termina com reconciliação. [Contrato HTTP](docs/API_CONTRACT.md) · [Guia do Postman](docs/POSTMAN_GUIDE.md)
 
 ```powershell
 bun run demo:http
@@ -164,7 +163,7 @@ bun run test:unit
 bun run test:properties
 ```
 
-Para rodar a integração completa, prepare os serviços descartáveis com os valores de `.env.example`.
+Para a regressão completa em ambiente descartável, use `bun run verify:evidence`. Para executar suítes específicas no Compose padrão de desenvolvimento, prepare as dependências com os valores de `.env.example`.
 
 ```powershell
 docker compose --env-file .env.example up -d --wait postgres sqs

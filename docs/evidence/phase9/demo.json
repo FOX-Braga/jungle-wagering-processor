@@ -1,0 +1,80 @@
+{
+  "status": "PASS",
+  "mode": "demo",
+  "commit": "6c68af4dafb88775932345ed29f797ee8b376217",
+  "project": "jungle-phase9-936ad630-18b",
+  "platform": "win32",
+  "versions": {
+    "bun": "1.4.4",
+    "compose": "5.7.0",
+    "docker": "29.9.3"
+  },
+  "seconds": 44.5198449,
+  "steps": [
+    {
+      "step": "revision",
+      "exitCode": 0,
+      "seconds": 0.056169699999999996
+    },
+    {
+      "step": "build",
+      "exitCode": 0,
+      "seconds": 6.9132366
+    },
+    {
+      "step": "compose-version",
+      "exitCode": 0,
+      "seconds": 0.17160180000000036
+    },
+    {
+      "step": "docker-engine",
+      "exitCode": 0,
+      "seconds": 0.43716789999999944
+    },
+    {
+      "step": "start-services",
+      "exitCode": 0,
+      "seconds": 8.7446624
+    },
+    {
+      "step": "postgres-port",
+      "exitCode": 0,
+      "seconds": 0.25658360000000174
+    },
+    {
+      "step": "sqs-port",
+      "exitCode": 0,
+      "seconds": 0.30790459999999803
+    },
+    {
+      "step": "provision",
+      "exitCode": 0,
+      "seconds": 6.153573100000002
+    },
+    {
+      "step": "doctor",
+      "exitCode": 0,
+      "seconds": 1.539596099999999
+    },
+    {
+      "step": "demo-http-and-audit",
+      "exitCode": 0,
+      "seconds": 6.342242600000001
+    },
+    {
+      "step": "demo-concurrency",
+      "exitCode": 0,
+      "seconds": 4.656847900000001
+    },
+    {
+      "step": "demo-commit-before-ack",
+      "exitCode": 0,
+      "seconds": 6.580374599999995
+    },
+    {
+      "step": "cleanup",
+      "exitCode": 0,
+      "seconds": 2.3584995999999956
+    }
+  ]
+}

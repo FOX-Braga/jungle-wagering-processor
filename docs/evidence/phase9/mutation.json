@@ -1,0 +1,105 @@
+{
+  "runner": "Bun 1.4.4",
+  "baseline": {
+    "exitCode": 0,
+    "passed": 145,
+    "failed": 0,
+    "errors": 0
+  },
+  "detected": 10,
+  "survived": 0,
+  "invalid": 0,
+  "seconds": 23.5623911,
+  "results": [
+    {
+      "id": "ignore-currency",
+      "file": "src/domain/money/money.ts",
+      "status": "DETECTED",
+      "exitCode": 1,
+      "passed": 143,
+      "failed": 2,
+      "errors": 0
+    },
+    {
+      "id": "allow-money-negative-input",
+      "file": "src/domain/money/money.ts",
+      "status": "DETECTED",
+      "exitCode": 1,
+      "passed": 141,
+      "failed": 4,
+      "errors": 0
+    },
+    {
+      "id": "reject-exact-balance",
+      "file": "src/domain/wallet/wallet.ts",
+      "status": "DETECTED",
+      "exitCode": 1,
+      "passed": 144,
+      "failed": 1,
+      "errors": 0
+    },
+    {
+      "id": "invert-comparison",
+      "file": "src/domain/money/money.ts",
+      "status": "DETECTED",
+      "exitCode": 1,
+      "passed": 144,
+      "failed": 1,
+      "errors": 0
+    },
+    {
+      "id": "skip-ledger-balance-check",
+      "file": "src/domain/ledger/wallet-ledger-entry.ts",
+      "status": "DETECTED",
+      "exitCode": 1,
+      "passed": 143,
+      "failed": 2,
+      "errors": 0
+    },
+    {
+      "id": "credit-bet-instead-of-debiting",
+      "file": "src/domain/wagering/wager-transaction.ts",
+      "status": "DETECTED",
+      "exitCode": 1,
+      "passed": 137,
+      "failed": 8,
+      "errors": 0
+    },
+    {
+      "id": "reopen-processed-wager",
+      "file": "src/domain/wagering/wager-transaction.ts",
+      "status": "DETECTED",
+      "exitCode": 1,
+      "passed": 130,
+      "failed": 15,
+      "errors": 0
+    },
+    {
+      "id": "ignore-missing-reference",
+      "file": "src/domain/wagering/wager-transaction.ts",
+      "status": "DETECTED",
+      "exitCode": 1,
+      "passed": 143,
+      "failed": 2,
+      "errors": 0
+    },
+    {
+      "id": "allow-double-reversal",
+      "file": "src/domain/wagering/wager-transaction.ts",
+      "status": "DETECTED",
+      "exitCode": 1,
+      "passed": 143,
+      "failed": 2,
+      "errors": 0
+    },
+    {
+      "id": "allow-divergent-replay",
+      "file": "src/application/use-cases/process-wager-transaction.use-case.ts",
+      "status": "DETECTED",
+      "exitCode": 1,
+      "passed": 144,
+      "failed": 1,
+      "errors": 0
+    }
+  ]
+}
