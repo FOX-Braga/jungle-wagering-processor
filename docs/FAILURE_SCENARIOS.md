@@ -17,6 +17,20 @@
 
 ## Runbook
 
+Os procedimentos de primeira resposta, coleta de evidências e recuperação da Fase 7 estão no [runbook operacional](OPERATIONS_RUNBOOK.md).
+
+| Falha da Fase 7                           | Sinal                                          | Resultado esperado                                                       |
+| ----------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------ |
+| Projeção de saldo divergente              | `reconciliation.divergence` e auditoria exit 1 | Preservar dados e escalar P0.                                            |
+| PostgreSQL ou SQS fora do alcance da API  | Ready 503 e live 200                           | Restaurar a dependência e conferir identidade, ledger e backlog.         |
+| API na capacidade configurada             | HTTP 503 com `HTTP_OVERLOADED`                 | Reenviar a mesma identidade financeira após o prazo de `Retry-After`.    |
+| Publisher ou worker de referências parado | Idade persistente cresce e heartbeat envelhece | Recuperar o papel e confirmar drenagem ou resolução.                     |
+| Coleta de métricas falha                  | Disponibilidade zero por dependência           | Usar o último timestamp válido para identificar métricas desatualizadas. |
+
+O pool PostgreSQL tem até 10 conexões por processo, até 2,5 s para aquisição e 1,5 s para conectar. Queries de runtime têm timeout de cliente de 1,5 s e cancelamento no servidor em 1,4 s. Transações financeiras limitam a espera por lock a 1 s por padrão. A configuração limita a concorrência do consumer e os lotes de outbox e referência.
+
+Consumer, publisher e probes usam uma tentativa do SDK por chamada. O recebimento SQS tem deadline do long polling mais 5 s. Envio e ACK têm 3 s. O consumer usa backoff limitado a 30 s com redrive no broker. A outbox limita o backoff a 60 s e estaciona após o máximo configurado. Referências usam o mesmo teto de backoff e rejeitam por expiração ao atingir o limite. Ciclos de polling retomam após falhas com backoff limitado. O shutdown tem orçamento configurável e mantém recuperação baseada em inbox, outbox e visibilidade.
+
 1. Rode `bun run doctor` para checar conectividade e schema. Rode `bun run queues:inspect` para conferir atributos, redrive e profundidades aproximadas. Use logs do papel afetado e correlacione o `transportMessageId`, o `messageId` lógico e o `transactionId`.
 2. Para fila de entrada parada, confira poll ativo, erros de banco, tentativas e mensagens em trânsito. Uma mensagem em uma fila FIFO pode atrasar as seguintes do mesmo grupo até ACK ou redrive. Após recuperação, consulte o wager por provedor ou ID e reconcilie a carteira.
 3. Para crescimento da DLQ, inspecione o corpo original em uma sessão controlada com acesso de operador. Corrija a causa antes de reenviar um caso selecionado. Preserve a chave idempotente em reenvios equivalentes. Uma alteração de negócio exige uma identidade nova e aprovação conforme a operação financeira.
@@ -35,11 +49,11 @@ from wagering.wager_transactions
 where status = 'PENDING_REFERENCE';
 ```
 
-Depois que o destino recuperar, um operador pode reativar um evento estacionado pelo ID. Essa operação conserva o payload e habilita novamente a entrega at-least-once.
+Depois que o destino recuperar, um operador autorizado pode reativar um evento estacionado. Confirme o ID, a evidência do erro e a deduplicação downstream antes de executar. Passe o ID aprovado com `psql -X -v ON_ERROR_STOP=1 -v event_id=<id>` e execute o SQL na mesma sessão. Uma linha retornada confirma a reativação e habilita nova entrega com o mesmo ID e payload.
 
 ```sql
 update wagering.outbox_messages
 set parked_at = null, attempts = 0
-where id = :event_id and parked_at is not null and published_at is null
+where id = :'event_id' and parked_at is not null and published_at is null
 returning id;
 ```

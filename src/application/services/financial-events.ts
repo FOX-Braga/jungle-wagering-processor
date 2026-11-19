@@ -27,6 +27,7 @@ export async function enqueueWagerEvents(
     eventId: ids.next(),
     correlationId: trace.correlationId ?? transaction.id,
     ...(trace.causationId === undefined ? {} : { causationId: trace.causationId }),
+    ...(trace.sourceMessageId === undefined ? {} : { sourceMessageId: trace.sourceMessageId }),
   });
 
   switch (transaction.status) {

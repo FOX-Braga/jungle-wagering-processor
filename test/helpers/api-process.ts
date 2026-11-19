@@ -18,7 +18,12 @@ async function availablePort(): Promise<number> {
   return address.port;
 }
 
-export async function launchApi(databaseUrl: URL, instanceId: string, port?: number) {
+export async function launchApi(
+  databaseUrl: URL,
+  instanceId: string,
+  port?: number,
+  logLevel: "info" | "warn" = "info",
+) {
   const entrypoint = "dist/src/main.js";
   if (!existsSync(entrypoint)) throw new Error("Run bun run build first");
   const assignedPort = port ?? (await availablePort());
@@ -30,7 +35,7 @@ export async function launchApi(databaseUrl: URL, instanceId: string, port?: num
       PORT: String(assignedPort),
       DATABASE_URL: databaseUrl.href,
       INSTANCE_ID: instanceId,
-      LOG_LEVEL: "info",
+      LOG_LEVEL: logLevel,
     },
     stdin: "ignore",
     stdout: "pipe",
@@ -71,6 +76,7 @@ export async function launchApi(databaseUrl: URL, instanceId: string, port?: num
       client: httpClient(url),
       stop,
       stdout,
+      stderr,
     };
   } catch (error) {
     await stop();

@@ -2,7 +2,12 @@ import { IsolationLevel } from "@mikro-orm/core";
 import type { MikroORM } from "@mikro-orm/postgresql";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { FinancialRepositories } from "../../../application/ports/repositories/financial-repositories";
-import type { TransactionManager } from "../../../application/ports/transaction-manager";
+import {
+  PersistenceConflictError,
+  PersistenceUniqueError,
+  type TransactionManager,
+} from "../../../application/ports/transaction-manager";
+import { operationMetrics } from "../../observability/metrics";
 import { MikroLedgerRepository } from "../repositories/ledger-repository";
 import {
   MikroInboxRepository,
@@ -19,7 +24,10 @@ export class MikroTransactionManager implements TransactionManager {
 
   async execute<T>(
     work: (repositories: FinancialRepositories) => Promise<T>,
-    { lockTimeoutMs = 1_000 }: { readonly lockTimeoutMs?: number } = {},
+    {
+      lockTimeoutMs = 1_000,
+      readOnly = false,
+    }: { readonly lockTimeoutMs?: number; readonly readOnly?: boolean } = {},
   ): Promise<T> {
     if (this.active.getStore()) throw new Error("Reuse the repositories of the active transaction");
     if (!Number.isSafeInteger(lockTimeoutMs) || lockTimeoutMs < 1 || lockTimeoutMs > 1_200) {
@@ -29,6 +37,7 @@ export class MikroTransactionManager implements TransactionManager {
     try {
       return await this.orm.em.fork().transactional(
         async (em) => {
+          if (readOnly) await em.execute("set transaction read only");
           await em.execute("select set_config('lock_timeout', ?, true)", [`${lockTimeoutMs}ms`]);
           const ledger = new MikroLedgerRepository(em);
           return this.active.run(true, () =>
@@ -44,7 +53,18 @@ export class MikroTransactionManager implements TransactionManager {
         { isolationLevel: IsolationLevel.READ_COMMITTED },
       );
     } catch (error) {
-      throw normalizePersistenceError(error);
+      const failure = normalizePersistenceError(error);
+      const observation = operationMetrics.getStore();
+      if (failure instanceof PersistenceConflictError) {
+        observation?.metrics.record("wager_wallet_lock_conflicts_total", 1, failure.reason);
+      } else if (
+        observation &&
+        failure instanceof PersistenceUniqueError &&
+        ["wager-idempotency", "wager-external", "inbox-message"].includes(failure.resource)
+      ) {
+        observation.metrics.record("wager_processing_retries_total", 1, observation.source);
+      }
+      throw failure;
     }
   }
 }

@@ -23,6 +23,7 @@ export class OutboxPublisher {
       signal,
       this.config.OUTBOX_POLL_INTERVAL_MS,
       (attempt) => this.log("warn", { result: "outbox_poll_failed", attempt }),
+      this.context.metrics,
     );
   }
 
@@ -32,9 +33,14 @@ export class OutboxPublisher {
       owner: crypto.randomUUID(),
       until: new Date(now.getTime() + this.config.OUTBOX_LEASE_SECONDS * 1000),
     };
+    let recovered = 0;
     const messages = await this.transactions.execute(({ outbox }) =>
-      outbox.claimDue(now, this.config.OUTBOX_BATCH_SIZE, claim),
+      outbox.claimDue(now, this.config.OUTBOX_BATCH_SIZE, claim, () => {
+        recovered++;
+      }),
     );
+    this.context.metrics?.record("wager_outbox_events_total", messages.length, "claimed");
+    this.context.metrics?.record("wager_outbox_events_total", recovered, "claim_recovered");
     const completed = await Promise.allSettled(
       messages.map((message) => this.publish(message, claim)),
     );
@@ -46,6 +52,7 @@ export class OutboxPublisher {
 
   private async publish(message: OutboxMessage, claim: OutboxClaim): Promise<void> {
     const started = Date.now();
+    const monotonicStart = performance.now();
     const data = message.payload.data;
     const identifiers =
       data && typeof data === "object" && !Array.isArray(data) ? (data as JsonObject) : undefined;
@@ -55,6 +62,7 @@ export class OutboxPublisher {
       aggregateId: message.aggregateId,
       correlationId: message.payload.correlationId,
       causationId: message.payload.causationId,
+      sourceMessageId: message.payload.sourceMessageId,
       walletId: typeof identifiers?.walletId === "string" ? identifiers.walletId : undefined,
       providerId: typeof identifiers?.providerId === "string" ? identifiers.providerId : undefined,
       transactionId:
@@ -66,7 +74,7 @@ export class OutboxPublisher {
       this.log("warn", { ...details, result: "outbox_lease_too_short" });
       return;
     }
-    let accepted = false;
+    let messageId: string | undefined;
     try {
       const reply = await this.client.send(
         new SendMessageCommand({
@@ -75,10 +83,16 @@ export class OutboxPublisher {
         }),
         { abortSignal: AbortSignal.timeout(sendTimeoutMs) },
       );
-      accepted = Boolean(reply.MessageId);
+      messageId = reply.MessageId;
     } catch {
       // An ambiguous response is retried with the same persisted eventId.
+    } finally {
+      this.context.metrics?.record(
+        "wager_outbox_publish_duration_seconds",
+        (performance.now() - monotonicStart) / 1000,
+      );
     }
+    const accepted = Boolean(messageId);
     const at = new Date(
       Math.max(Date.now(), message.nextAttemptAt?.getTime() ?? message.occurredAt.getTime()),
     );
@@ -98,13 +112,21 @@ export class OutboxPublisher {
     this.log(saved && accepted ? "log" : "warn", {
       ...details,
       result,
-      durationMs: Date.now() - started,
+      messageId,
+      code: accepted ? undefined : "SQS_PUBLISH_UNCONFIRMED",
+      durationMs: performance.now() - monotonicStart,
     });
   }
 
-  private log(level: "log" | "warn", fields: object): void {
+  private log(level: "log" | "warn", fields: { result: string } & Record<string, unknown>): void {
+    this.context.metrics?.record("wager_outbox_events_total", 1, fields.result);
     this.context.logger[level](
-      { ...fields, workerInstanceId: this.context.workerInstanceId },
+      {
+        ...fields,
+        event: `outbox.event.${fields.result}`,
+        workerType: "outbox",
+        workerInstanceId: this.context.workerInstanceId,
+      },
       "OutboxPublisher",
     );
   }

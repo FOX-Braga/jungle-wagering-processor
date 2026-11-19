@@ -4,6 +4,7 @@ import type { WagerTransactionKind } from "../../domain/wagering/wager-transacti
 export interface EventTrace {
   readonly correlationId?: string;
   readonly causationId?: string;
+  readonly sourceMessageId?: string;
 }
 
 export interface CreateWalletCommand extends EventTrace {

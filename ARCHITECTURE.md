@@ -1,6 +1,14 @@
 # Arquitetura do Jungle Wagering Processor
 
-## Fundação disponível na Fase 1
+## Observabilidade e auditoria
+
+A infraestrutura emite logs JSON sanitizados e métricas por processo. Os adaptadores HTTP, SQS e de persistência observam o caso de uso e o commit. O contexto assíncrono para a instrumentação de banco é isolado por execução. O envelope persistido leva correlação entre processos, inclusive para a resolução de referências. O estado compartilhado vem de um coletor de gauges designado e do diagnóstico CLI. [ADR 0004](docs/adr/0004-operational-observation.md) · [Observabilidade](docs/OBSERVABILITY.md)
+
+A reconciliação HTTP preserva o SELECT atômico de saldo e ledger em uma transação somente leitura. O audit CLI usa `REPEATABLE READ` e paginação por ID. As discrepâncias são sinalizadas com log, métrica ou resultado de auditoria. O desenho mantém as fronteiras de commit, inbox, outbox e locking por carteira. [Reconciliação](docs/RECONCILIATION.md)
+
+A API de avaliação opera sem autenticação efetiva e com acesso restrito à rede do ambiente. A integração de identidade fica no `ProviderIdentityPort` e no guard HTTP futuro. Os papéis PostgreSQL de migrations, runtime e auditoria são provisionados separadamente em implantação. [Segurança](docs/SECURITY.md)
+
+## Componentes e fronteiras
 
 O repositório adota um monólito modular com Clean Architecture, Ports & Adapters e DDD tático. A Fase 1 estabelece o processo HTTP, a configuração, as duas dependências e o provisionamento reproduzível. A Fase 2 acrescenta o domínio financeiro puro com Money, Wallet, transações, ledger, inbox, outbox e eventos.
 
@@ -26,7 +34,7 @@ A configuração é validada antes de iniciar o HTTP. O driver inicializa de for
 | Infrastructure | Configuração, persistência, mensageria, workers e observabilidade     | MikroORM, SQS, migrations, probes e logger estruturado |
 | Presentation   | Controllers, DTOs, filtros e API                                      | API financeira, health público e OpenAPI               |
 
-As dependências apontam para o domínio e os casos de uso. Controllers adaptam HTTP e chamam a aplicação. Repositórios e clientes externos implementam as portas necessárias. O composition root no NestJS resolve a injeção. Um worker poderá usar um contexto isolado do MikroORM por unidade de trabalho, assim como uma requisição usa seu próprio contexto.
+As dependências apontam para o domínio e os casos de uso. Controllers adaptam HTTP e chamam a aplicação. Repositórios e clientes externos implementam as portas necessárias. O composition root no NestJS resolve a injeção. HTTP e workers usam um EntityManager isolado por unidade de trabalho.
 
 ## Decisões técnicas
 
@@ -76,8 +84,9 @@ sequenceDiagram
     participant Pub as Worker de outbox
     participant Sqs as SQS de eventos
     In->>Use: Comando validado
-    Use->>Db: Inicia transação e adquire lock da carteira
-    Use->>Db: Resolve replay e referências, registra resultado e efeitos
+    Use->>Db: Inicia transação e verifica replay persistente
+    Use->>Db: Para comando novo, adquire lock da carteira e verifica novamente
+    Use->>Db: Resolve referência e registra resultado e efeitos
     Use->>Db: Commit com ledger, inbox aplicável e outbox
     Db-->>Use: Commit confirmado
     Use-->>In: Resposta ou autorização para ack
@@ -98,3 +107,32 @@ O [modelo de domínio](docs/DOMAIN_MODEL.md) descreve as factories, os fluxos e 
 - A decisão inicial trata `REFUND` e `ROLLBACK` diretos da mesma `BET` como alternativas para evitar dois créditos. `ROLLBACK` da própria `REFUND` continua permitido. Trata-se de uma interpretação adicional à proteção mínima do enunciado por tipo.
 - Referência ausente fica pendente com snapshot persistido. O worker agenda novas verificações com backoff e registra `REFERENCE_NOT_FOUND` com evento de rejeição quando o limite acaba.
 - Códigos de negócio definidos incluem `INSUFFICIENT_FUNDS`, `REVERSAL_INSUFFICIENT_FUNDS`, `INVALID_REFERENCE`, `AMOUNT_MISMATCH`, `CURRENCY_MISMATCH` e `ALREADY_REVERSED`. Idempotência divergente é conflito. Falha transitória de dependência é indisponibilidade.
+
+### Decisão financeira e recuperação
+
+```mermaid
+flowchart TD
+    Input["BET, REFUND ou ROLLBACK validado"] --> Lock["Lock da carteira e verificação do replay"]
+    Lock --> Bet{"É BET?"}
+    Bet -->|Sim| Debit["Tenta débito"]
+    Bet -->|Não| Ref["Resolve referência e verifica vínculo, valor e reversões"]
+    Ref -->|Ausente ou em voo| Pending["Persiste pendência e agenda nova verificação"]
+    Ref -->|Elegível| Invert["REFUND credita. ROLLBACK inverte o movimento da referência"]
+    Ref -->|Incompatível| Reject["Persiste rejeição"]
+    Debit --> Commit["Commit do resultado, efeitos e Outbox"]
+    Invert --> Commit
+    Pending --> Commit
+    Reject --> Commit
+    Commit --> Ack["ACK SQS ou resposta HTTP"]
+    Commit --> Replay["Crash antes do ACK permite replay pela Inbox"]
+```
+
+Os diagramas de [entrega e recuperação da Inbox](docs/MESSAGING_ARCHITECTURE.md#consumer-inbox-e-dlq), [publicação da Outbox](docs/MESSAGING_ARCHITECTURE.md#publisher-da-outbox) e [reconciliação](docs/RECONCILIATION.md) detalham as fronteiras entre processos.
+
+## Trade-offs de operação
+
+- O lock por carteira limita a vazão de uma carteira muito disputada. Operações independentes escalam com réplicas, desde que a soma dos pools caiba no PostgreSQL.
+- O commit mantém eventos recuperáveis. O envio pode ocorrer mais de uma vez, com o mesmo `eventId`. Eventos estacionados preservam a trilha e exigem ação operacional.
+- A Inbox limita o efeito financeiro a uma vez. A visibilidade e a ordenação do broker reduzem repetições e contenção. Lotes maiores que um também podem consumir tentativas de mensagens aguardando o mesmo grupo.
+- A auditoria e a reconciliação indicam a divergência sem alterar projeção ou ledger. A operação determina o procedimento contábil posterior.
+- O ambiente validado usa um host, PostgreSQL local e MiniStack. Avaliação em AWS, topologia HA e identidade OIDC ativa são extensões de implantação. [Carga](docs/LOAD_TEST_REPORT.md) · [Segurança](docs/SECURITY_REVIEW.md)

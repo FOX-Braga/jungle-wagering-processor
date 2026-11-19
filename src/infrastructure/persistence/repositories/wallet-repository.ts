@@ -6,6 +6,7 @@ import type {
 } from "../../../application/ports/repositories/financial-repositories";
 import type { WalletLedgerEntry } from "../../../domain/ledger/wallet-ledger-entry";
 import type { Wallet } from "../../../domain/wallet/wallet";
+import { operationMetrics } from "../../observability/metrics";
 import { WalletRow } from "../entities/financial-entities";
 import { toWallet, walletBaseline } from "../mappers/financial-mappers";
 
@@ -30,11 +31,18 @@ export class MikroWalletRepository implements WalletRepository {
   }
 
   async lockById(walletId: string): Promise<Wallet | undefined> {
-    const row = await this.em.findOne(WalletRow, walletId, {
-      lockMode: LockMode.PESSIMISTIC_WRITE,
-      refresh: true,
-    });
-    return row ? toWallet(row) : undefined;
+    const started = performance.now();
+    try {
+      const row = await this.em.findOne(WalletRow, walletId, {
+        lockMode: LockMode.PESSIMISTIC_WRITE,
+        refresh: true,
+      });
+      return row ? toWallet(row) : undefined;
+    } finally {
+      operationMetrics
+        .getStore()
+        ?.metrics.record("wager_wallet_lock_wait_seconds", (performance.now() - started) / 1000);
+    }
   }
 
   async saveMovement(wallet: Wallet, entry: WalletLedgerEntry): Promise<void> {

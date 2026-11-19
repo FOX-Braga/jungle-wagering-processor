@@ -26,12 +26,14 @@ export function loadIntegrationConfig() {
 
 export async function createTestDatabase(migrate = true) {
   const config = loadIntegrationConfig();
-  const options = createOrmOptions(config);
+  const options = createOrmOptions(config, 10_000);
   const admin = await MikroORM.init(options);
   const name = `financial_test_${randomUUID().replaceAll("-", "")}`;
   const url = new URL(config.DATABASE_URL);
   url.pathname = `/${name}`;
-  const testOptions = createOrmOptions({ ...config, DATABASE_URL: url.href });
+  const testConfig = { ...config, DATABASE_URL: url.href };
+  const migrationOptions = createOrmOptions(testConfig, 10_000);
+  const testOptions = migrate ? createOrmOptions(testConfig) : migrationOptions;
   const connection = admin.em.getConnection();
   let created = false;
   let orm: MikroORM | undefined;
@@ -54,8 +56,15 @@ export async function createTestDatabase(migrate = true) {
   try {
     await connection.execute(`create database "${name}"`);
     created = true;
+    if (migrate) {
+      const migrationOrm = await MikroORM.init(migrationOptions);
+      try {
+        await migrationOrm.getMigrator().up();
+      } finally {
+        await migrationOrm.close(true);
+      }
+    }
     orm = await MikroORM.init(testOptions);
-    if (migrate) await orm.getMigrator().up();
     return { orm, close, testOptions, name, url };
   } catch (error) {
     await close();

@@ -4,6 +4,7 @@ import type { ProcessWagerTransactionUseCase } from "../../application/use-cases
 import { FailureCode } from "../../domain/shared/failure-code";
 import { WagerTransactionStatus } from "../../domain/wagering/wager-transaction";
 import type { AppConfig } from "../config/environment";
+import { observeWager } from "../observability/wager-observation";
 import { poll, type WorkerContext } from "./worker-loop";
 
 export class ReferenceWorker {
@@ -23,6 +24,7 @@ export class ReferenceWorker {
       signal,
       this.config.REFERENCE_WORKER_INTERVAL_MS,
       (attempt) => this.log("warn", { result: "reference_poll_failed", attempt }),
+      this.context.metrics,
     );
   }
 
@@ -30,22 +32,39 @@ export class ReferenceWorker {
     const due = await this.transactions.execute(({ wagers }) =>
       wagers.findDueReferences(new Date(), this.config.REFERENCE_WORKER_BATCH_SIZE),
     );
-    for (const { id: transactionId, providerId, walletId, referenceAttempts } of due) {
+    for (const {
+      id: transactionId,
+      providerId,
+      walletId,
+      referenceAttempts,
+      correlationId,
+      causationId,
+      sourceMessageId,
+      createdAtMs,
+    } of due) {
       if (signal.aborted) return;
       const started = performance.now();
       const trace = {
         transactionId,
         providerId,
         walletId,
-        correlationId: transactionId,
+        correlationId: correlationId ?? transactionId,
+        ...(causationId ? { causationId } : {}),
+        ...(sourceMessageId ? { sourceMessageId, messageId: sourceMessageId } : {}),
         attempt: referenceAttempts + 1,
       };
       try {
-        const outcome = await this.processor.retryPendingReference(transactionId, {
-          maxAttempts: this.config.REFERENCE_MAX_ATTEMPTS,
-          baseDelayMs: 1_000,
-          maxDelayMs: 60_000,
-        });
+        const outcome = await observeWager(this.context.metrics, "references", () =>
+          this.processor.retryPendingReference(
+            transactionId,
+            {
+              maxAttempts: this.config.REFERENCE_MAX_ATTEMPTS,
+              baseDelayMs: 1_000,
+              maxDelayMs: 60_000,
+            },
+            trace,
+          ),
+        );
         if (!outcome) continue;
         const result =
           outcome.status === WagerTransactionStatus.PendingReference
@@ -53,6 +72,14 @@ export class ReferenceWorker {
             : outcome.failureCode === FailureCode.ReferenceNotFound
               ? "reference_expired"
               : "reference_finalized";
+        if (result === "reference_rescheduled")
+          this.context.metrics?.record("wager_processing_retries_total", 1, "references");
+        else if (createdAtMs !== undefined) {
+          this.context.metrics?.record(
+            "wager_reference_resolution_duration_seconds",
+            Math.max(0, Date.now() - createdAtMs) / 1000,
+          );
+        }
         this.log("log", {
           ...trace,
           result,
@@ -67,9 +94,15 @@ export class ReferenceWorker {
     }
   }
 
-  private log(level: "log" | "warn", fields: object): void {
+  private log(level: "log" | "warn", fields: { result: string } & Record<string, unknown>): void {
+    this.context.metrics?.record("wager_reference_events_total", 1, fields.result);
     this.context.logger[level](
-      { ...fields, workerInstanceId: this.context.workerInstanceId },
+      {
+        ...fields,
+        event: `reference.${fields.result}`,
+        workerType: "references",
+        workerInstanceId: this.context.workerInstanceId,
+      },
       "PendingReferenceWorker",
     );
   }

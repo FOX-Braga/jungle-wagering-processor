@@ -1,6 +1,5 @@
-import { ListQueuesCommand } from "@aws-sdk/client-sqs";
 import { MikroORM } from "@mikro-orm/postgresql";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { createOrmOptions } from "../../mikro-orm.config";
 import {
   ConfigurationError,
@@ -11,6 +10,8 @@ import {
 } from "../../src/infrastructure/config/environment";
 import { createSqsClient } from "../../src/infrastructure/messaging/sqs-client";
 import { SqsService } from "../../src/infrastructure/messaging/sqs.service";
+import { collectBacklog } from "../../src/infrastructure/observability/backlog";
+import { Metrics } from "../../src/infrastructure/observability/metrics";
 import { checkPostgres } from "../../src/infrastructure/persistence/postgres-probe";
 import { runMigrations } from "./migrate";
 import { provisionQueues } from "./queues";
@@ -74,27 +75,23 @@ async function doctor(config: AppConfig): Promise<void> {
     }),
   );
 
-  const orm = await MikroORM.init(createOrmOptions(config));
+  const options = createOrmOptions(config);
+  const orm = await MikroORM.init(options);
   const client = createSqsClient(config, 1);
   const sqs = new SqsService(config);
+  const metrics = new Metrics(config.INSTANCE_ID ?? crypto.randomUUID());
   try {
     const checks = await Promise.allSettled([
       checkPostgres(orm),
       sqs.checkQueues(),
-      client
-        .send(new ListQueuesCommand({ QueueNamePrefix: "wager-transactions" }), {
-          abortSignal: AbortSignal.timeout(2_000),
-        })
-        .then(({ QueueUrls }) => {
-          const names = new Set(QueueUrls?.map((url) => new URL(url).pathname.split("/").at(-1)));
-          if (!names.has(WAGER_QUEUE_NAME) || !names.has(WAGER_DLQ_NAME)) {
-            throw new Error("Filas obrigatórias ausentes");
-          }
-        }),
-      runMigrations(config, "status"),
+      migrationInventory(orm, options.migrations?.path),
+      collectBacklog(orm, client, config, metrics).then((healthy) => {
+        console.log(JSON.stringify({ check: "backlog", ...metrics.snapshot() }));
+        if (!healthy) throw new Error("Backlog unavailable");
+      }),
     ]);
 
-    const names = ["postgres", "sqs", "queues", "migrations"];
+    const names = ["postgres", "sqs_queues", "migrations", "backlog"];
     for (const [index, result] of checks.entries()) {
       console.log(
         JSON.stringify({
@@ -103,6 +100,10 @@ async function doctor(config: AppConfig): Promise<void> {
         }),
       );
     }
+    const ready = checks[0]?.status === "fulfilled" && checks[1]?.status === "fulfilled";
+    console.log(
+      JSON.stringify({ check: "readiness_dependencies", status: ready ? "ok" : "error" }),
+    );
     if (checks.some((result) => result.status === "rejected")) {
       throw new BootstrapError(
         "Diagnóstico encontrou dependências indisponíveis ou configuração incompleta",
@@ -113,6 +114,21 @@ async function doctor(config: AppConfig): Promise<void> {
     sqs.onModuleDestroy();
     await orm.close(true);
   }
+}
+
+async function migrationInventory(orm: MikroORM, path: string | undefined): Promise<void> {
+  if (!path) throw new Error("Missing migrations directory");
+  const expected = readdirSync(path).flatMap((file) => {
+    const name = /^Migration\d+(?=\.(?:ts|js)$)/.exec(file)?.[0];
+    return name ? [name] : [];
+  });
+  const rows = await orm.em
+    .getConnection()
+    .execute<{ name: string }[]>("select name from public.mikro_orm_migrations");
+  const applied = rows.map(({ name }) => name);
+  const pending = expected.filter((name) => !applied.includes(name));
+  console.log(JSON.stringify({ check: "migration_inventory", applied, pending }));
+  if (expected.length === 0 || pending.length > 0) throw new Error("Pending migrations");
 }
 
 async function main(): Promise<void> {

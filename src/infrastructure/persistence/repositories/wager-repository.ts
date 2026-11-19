@@ -1,4 +1,4 @@
-import { raw, type FilterQuery } from "@mikro-orm/core";
+import type { FilterQuery } from "@mikro-orm/core";
 import type { EntityManager } from "@mikro-orm/postgresql";
 import type {
   PendingReferenceCandidate,
@@ -14,8 +14,6 @@ import {
 import { WagerRow } from "../entities/financial-entities";
 import { toWager, wagerRow, wagerState } from "../mappers/financial-mappers";
 import { pageLimit } from "./page-limit";
-
-const referenceDueAt = "coalesce(reference_next_attempt_at, created_at)";
 
 export class MikroWagerRepository implements WagerTransactionRepository {
   constructor(private readonly em: EntityManager) {}
@@ -66,16 +64,29 @@ export class MikroWagerRepository implements WagerTransactionRepository {
   }
 
   findDueReferences(now: Date, limit: number): Promise<PendingReferenceCandidate[]> {
-    return this.em
-      .createQueryBuilder(WagerRow)
-      .select(["id", "walletId", "providerId", "referenceAttempts"])
-      .where({
-        status: WagerTransactionStatus.PendingReference,
-        [raw(referenceDueAt)]: { $lte: now },
-      })
-      .orderBy({ [raw(referenceDueAt)]: "asc", id: "asc" })
-      .limit(pageLimit(limit))
-      .execute<PendingReferenceCandidate[]>();
+    return this.em.execute<PendingReferenceCandidate[]>(
+      `
+      select w.id, w.wallet_id as "walletId", w.provider_id as "providerId",
+             w.reference_attempts as "referenceAttempts",
+             (extract(epoch from w.created_at) * 1000)::double precision as "createdAtMs",
+             event.payload->>'correlationId' as "correlationId",
+             event.payload->>'causationId' as "causationId",
+             event.payload->>'sourceMessageId' as "sourceMessageId"
+      from (
+        select id, wallet_id, provider_id, reference_attempts, created_at, reference_next_attempt_at
+        from wagering.wager_transactions
+        where status = 'PENDING_REFERENCE' and coalesce(reference_next_attempt_at, created_at) <= ?
+        order by coalesce(reference_next_attempt_at, created_at), id limit ?
+      ) w
+      left join lateral (
+        select payload from wagering.outbox_messages
+        where aggregate_id = w.id and event_type = 'WagerTransactionPendingReference'
+        order by occurred_at, id limit 1
+      ) event on true
+      order by coalesce(w.reference_next_attempt_at, w.created_at), w.id
+    `,
+      [now, pageLimit(limit)],
+    );
   }
 
   async scheduleReferenceRetry(id: string, attempts: number, dueAt: Date): Promise<void> {

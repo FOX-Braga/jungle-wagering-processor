@@ -7,23 +7,31 @@ import type { Server } from "node:http";
 import { AppModule } from "../../app.module";
 import type { AppConfig } from "../../infrastructure/config/environment";
 import { createLogger } from "../../infrastructure/observability/logger";
+import { Metrics } from "../../infrastructure/observability/metrics";
 import { identifierPattern } from "./dto/financial-requests";
 import { HttpExceptionFilter } from "./http-exception.filter";
 import { HttpValidationPipe } from "./http-validation.pipe";
-import { requestContextMiddleware } from "./request-context";
+import { HttpAdmissionInterceptor, requestContextMiddleware } from "./request-context";
 
 export const httpBodyLimit = 16 * 1024;
 
-export async function createHttpApplication(config: AppConfig): Promise<NestExpressApplication> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule.register(config), {
-    logger: createLogger(config.LOG_LEVEL),
-    abortOnError: false,
-    bodyParser: false,
-  });
+export async function createHttpApplication(
+  config: AppConfig,
+  metrics = new Metrics(config.INSTANCE_ID ?? randomUUID()),
+): Promise<NestExpressApplication> {
+  const app = await NestFactory.create<NestExpressApplication>(
+    AppModule.register(config, metrics),
+    {
+      logger: createLogger(config.LOG_LEVEL, metrics.instanceId),
+      abortOnError: false,
+      bodyParser: false,
+    },
+  );
   app.disable("x-powered-by");
-  app.use(requestContextMiddleware(config.INSTANCE_ID ?? randomUUID()));
+  app.use(requestContextMiddleware(metrics.instanceId, metrics, config.HTTP_MAX_IN_FLIGHT));
   app.useBodyParser("json", { limit: httpBodyLimit, strict: true, inflate: false });
   app.useGlobalPipes(new HttpValidationPipe());
+  app.useGlobalInterceptors(new HttpAdmissionInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter());
 
   if (config.NODE_ENV !== "production") {

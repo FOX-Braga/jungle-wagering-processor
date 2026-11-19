@@ -8,6 +8,7 @@ erDiagram
     WALLETS ||--o{ WALLET_LEDGER_ENTRIES : registra
     WAGER_TRANSACTIONS ||--o| WALLET_LEDGER_ENTRIES : produz
     WAGER_TRANSACTIONS o|--o{ WAGER_TRANSACTIONS : referencia
+    WAGER_TRANSACTIONS o|--o{ INBOX_MESSAGES : conclui
 
     WALLETS {
         text id PK
@@ -57,6 +58,7 @@ erDiagram
         text consumer_name PK
         text message_id PK
         text payload_hash
+        text transaction_id FK
         timestamptz received_at
         timestamptz processed_at
     }
@@ -133,6 +135,9 @@ O método `ledger.auditBalance(walletId)` usa uma única instrução SQL para le
 2. `Migration20261118000100` cria tipos, tabelas, constraints e índices.
 3. `Migration20261118000200` instala os guards, a projeção de saldo e os triggers de imutabilidade.
 4. `Migration20261118000300` permite preencher o snapshot de `PENDING_REFERENCE` e adiciona `requested_currency`, que conserva a moeda original em rejeições por divergência sob um CHECK e um guard de imutabilidade.
+5. `Migration20261118000400` acrescenta o agendamento de referências e os leases da Outbox.
+6. `Migration20261118000500` acrescenta um índice para recuperar a correlação de referências pendentes na Outbox.
+7. `Migration20261118000600` acrescenta `transaction_id` opcional à Inbox. `fk_inbox_wager` valida a existência do wager e `ck_inbox_transaction_completed` exige `processed_at` quando houver vínculo. A migração preserva recibos anteriores e bloqueia rollback quando a coluna contém vínculos.
 
 As migrations são transacionais e têm reversões testadas em bancos descartáveis. O rollback recusa desproteger carteiras existentes ou remover tabelas com registros. A metadata ORM é usada para mapeamento. A evolução do schema usa migrations versionadas.
 
@@ -142,21 +147,10 @@ A configuração de desenvolvimento aponta o pgAdmin e a API para o seu `jungle_
 
 A conta de migrations é proprietária do schema. A conta de execução em ambiente implantado recebe acesso de leitura, inserção e atualização apenas dos campos operacionais. PostgreSQL exige algum privilégio de UPDATE para `FOR UPDATE`, por isso a conta pode receber UPDATE de `updated_at` na wallet. O guard de projeção exige o ledger para a alteração. O trigger de projeção executa com privilégios da conta proprietária e um `search_path` fixo.
 
-```sql
--- Execute com o proprietário do schema, após criar o papel wagering_app.
-grant usage on schema wagering to wagering_app;
-grant select, insert on all tables in schema wagering to wagering_app;
-grant update (updated_at) on wagering.wallets to wagering_app;
-grant update (status, reference_transaction_id, failure_code, processed_at,
-              result_balance, result_wallet_version, updated_at)
-  on wagering.wager_transactions to wagering_app;
-grant update (processed_at) on wagering.inbox_messages to wagering_app;
-grant update (attempts, next_attempt_at, published_at, claim_owner, claim_until)
-  on wagering.outbox_messages to wagering_app;
-```
+Aplique o [arquivo de grants](../scripts/bootstrap/database-privileges.sql) após as migrations. O procedimento provisiona os privilégios de runtime e leitura para auditoria. [Segurança operacional](SECURITY.md)
 
 O Compose de desenvolvimento usa sua conta local de bootstrap. Os testes demonstram a política com um papel temporário restrito. Administradores com privilégios de DDL podem remover triggers e constraints. A proteção operacional depende da separação dos papéis.
 
 ## Escopo de integração
 
-O schema protege saldo, encadeamento, referências, imutabilidade e unicidade. A atomicidade da operação de domínio depende do uso do TransactionManager para preparar transação, lançamento, inbox e outbox no mesmo commit. A fase de aplicação implementa canonicalização, replay histórico e retomada de referência pelo mesmo ID. A conexão com HTTP e SQS, o reagendamento e a publicação de eventos pertencem às próximas fases. [Motor financeiro](FINANCIAL_PROCESSING.md)
+O schema protege saldo, encadeamento, referências, imutabilidade e unicidade. HTTP e SQS usam o mesmo TransactionManager para preparar transação, lançamento, Inbox e Outbox no mesmo commit. A camada de aplicação implementa canonicalização, replay histórico e retomada de referência pelo mesmo ID. [Motor financeiro](FINANCIAL_PROCESSING.md) · [Arquitetura de mensageria](MESSAGING_ARCHITECTURE.md)

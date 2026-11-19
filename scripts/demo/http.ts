@@ -35,6 +35,7 @@ async function post(
 const walletSchema = z.object({ id: z.string() });
 const wagerSchema = z.object({
   transactionId: z.string(),
+  status: z.literal("PROCESSED"),
   balance: z.object({ amount: z.string() }),
   idempotentReplay: z.boolean(),
 });
@@ -57,43 +58,85 @@ async function run(): Promise<void> {
     gameId: "game-demo",
     roundId: "round-demo",
     kind: "BET",
-    money: { amount: "25.00", currency: "BRL" },
+    money: { amount: "30.00", currency: "BRL" },
   };
   const key = `${providerId}:${externalTransactionId}`;
   const first = wagerSchema.parse(await post("/wagering/transactions", 200, bet, key));
-  const win = wagerSchema.parse(
-    await post(
-      "/wagering/transactions",
-      200,
-      {
-        ...bet,
-        externalTransactionId: randomUUID(),
-        kind: "WIN",
-        money: { amount: "50.00", currency: "BRL" },
-      },
-      `${providerId}:${randomUUID()}`,
-    ),
-  );
+  async function submit(kind: string, amount: string, referenceExternalTransactionId?: string) {
+    const id = randomUUID();
+    const result = wagerSchema.parse(
+      await post(
+        "/wagering/transactions",
+        200,
+        {
+          ...bet,
+          externalTransactionId: id,
+          kind,
+          money: { amount, currency: "BRL" },
+          ...(referenceExternalTransactionId ? { referenceExternalTransactionId } : {}),
+        },
+        `${providerId}:${id}`,
+      ),
+    );
+    if (result.idempotentReplay) throw new Error(`Unexpected replay for ${kind}`);
+    return { id, result };
+  }
+  const win = await submit("WIN", "50.00", externalTransactionId);
   const replay = wagerSchema.parse(await post("/wagering/transactions", 200, bet, key));
+  const refund = await submit("REFUND", "30.00", externalTransactionId);
+  const rollback = await submit("ROLLBACK", "30.00", refund.id);
+  const loss = await submit("LOSS", "0.00");
+  const response = await fetch(new URL(`/wallets/${walletId}/ledger`, baseUrl), {
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw new Error(`Ledger returned ${response.status}`);
+  const ledger = z
+    .object({
+      items: z
+        .array(z.object({ direction: z.enum(["DEBIT", "CREDIT"]), transactionId: z.string() }))
+        .length(5),
+    })
+    .parse(await response.json());
   const audit = z
     .object({
       consistent: z.literal(true),
-      checkedEntries: z.literal(3),
-      storedBalance: z.object({ amount: z.literal("125.00") }),
+      checkedEntries: z.literal(5),
+      storedBalance: z.object({ amount: z.literal("120.00") }),
+      difference: z.object({ amount: z.literal("0.00") }),
     })
     .parse(await post(`/wallets/${walletId}/reconciliation`, 200));
   if (
     first.idempotentReplay ||
-    first.balance.amount !== "75.00" ||
-    win.balance.amount !== "125.00" ||
+    first.balance.amount !== "70.00" ||
+    win.result.balance.amount !== "120.00" ||
+    refund.result.balance.amount !== "150.00" ||
+    rollback.result.balance.amount !== "120.00" ||
+    loss.result.balance.amount !== "120.00" ||
     !replay.idempotentReplay ||
     replay.transactionId !== first.transactionId ||
-    replay.balance.amount !== "75.00"
+    replay.balance.amount !== "70.00" ||
+    ledger.items.filter(({ direction }) => direction === "DEBIT").length !== 2 ||
+    ledger.items.some(({ transactionId }) => transactionId === loss.result.transactionId)
   ) {
     throw new Error("Financial HTTP demo generated an unexpected result");
   }
   console.log(
-    JSON.stringify({ walletId, bet: first, win, replay, reconciliation: audit }, null, 2),
+    JSON.stringify(
+      {
+        status: "PASS",
+        walletId,
+        bet: first,
+        win: win.result,
+        replay,
+        refund: refund.result,
+        rollback: rollback.result,
+        loss: loss.result,
+        ledgerEntries: ledger.items.length,
+        reconciliation: audit,
+      },
+      null,
+      2,
+    ),
   );
 }
 

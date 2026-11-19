@@ -31,7 +31,7 @@ let orm: MikroORM;
 let sqs: SQSClient;
 
 beforeAll(async () => {
-  orm = await MikroORM.init(createOrmOptions(config));
+  orm = await MikroORM.init(createOrmOptions(config, 10_000));
   sqs = createSqsClient(config, 1);
 
   await waitFor(

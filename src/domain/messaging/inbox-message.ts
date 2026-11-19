@@ -11,11 +11,13 @@ export interface ReceiveInboxProps {
 
 export interface InboxMessageState extends ReceiveInboxProps {
   readonly processedAt?: Date;
+  readonly transactionId?: string;
 }
 
 export class InboxMessage {
   readonly #receivedAt: number;
   #processedAt: number | undefined;
+  #transactionId: string | undefined;
 
   private constructor(
     public readonly messageId: string,
@@ -23,9 +25,11 @@ export class InboxMessage {
     public readonly payloadHash: string,
     receivedAt: Date,
     processedAt?: Date,
+    transactionId?: string,
   ) {
     this.#receivedAt = receivedAt.getTime();
     this.#processedAt = processedAt?.getTime();
+    this.#transactionId = transactionId;
     Object.freeze(this);
   }
 
@@ -47,6 +51,7 @@ export class InboxMessage {
       state.payloadHash,
       state.receivedAt,
       state.processedAt,
+      state.transactionId,
     );
   }
 
@@ -62,13 +67,20 @@ export class InboxMessage {
     return this.#processedAt !== undefined;
   }
 
-  markProcessed(at: Date): void {
+  get transactionId(): string | undefined {
+    return this.#transactionId;
+  }
+
+  markProcessed(at: Date, transactionId?: string): void {
     if (this.isProcessed()) {
       throw new DomainUsageError(
         FailureCode.InvalidMessageState,
         "Inbox message is already processed",
       );
     }
+    if (transactionId !== undefined)
+      requireFields(FailureCode.InvalidMessageState, { transactionId });
     this.#processedAt = timestamp(at, FailureCode.InvalidMessage, this.#receivedAt);
+    this.#transactionId = transactionId;
   }
 }

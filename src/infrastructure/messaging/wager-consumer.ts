@@ -12,11 +12,13 @@ import {
   PersistenceUnavailableError,
 } from "../../application/ports/transaction-manager";
 import type { ProcessWagerTransactionUseCase } from "../../application/use-cases/process-wager-transaction.use-case";
+import { WagerTransactionStatus } from "../../domain/wagering/wager-transaction";
 import type { AppConfig } from "../config/environment";
+import { observeWager } from "../observability/wager-observation";
 import { InvalidWagerMessage, parseWagerMessage } from "./wager-message";
 import { pause, poll, retryDelay, type WorkerContext } from "./worker-loop";
 
-function classify(error: unknown) {
+export function classifyWagerFailure(error: unknown) {
   if (error instanceof InvalidWagerMessage) return { permanent: true, code: error.message };
   if (error instanceof ApplicationError) return { permanent: true, code: error.code };
   if (error instanceof PersistenceConflictError) return { permanent: false, code: error.reason };
@@ -26,6 +28,8 @@ function classify(error: unknown) {
 }
 
 export class WagerConsumer {
+  private inFlight = 0;
+
   constructor(
     private readonly client: SQSClient,
     private readonly processor: Pick<ProcessWagerTransactionUseCase, "execute">,
@@ -34,97 +38,171 @@ export class WagerConsumer {
   ) {}
 
   async run(signal: AbortSignal): Promise<void> {
+    const { SQS_CONSUMER_CONCURRENCY: capacity, SQS_CONSUMER_BATCH_SIZE: batchSize } = this.config;
     await Promise.all(
-      Array.from({ length: this.config.SQS_CONSUMER_CONCURRENCY }, () =>
+      Array.from({ length: Math.ceil(capacity / batchSize) }, (_, index) =>
         poll(
           async () => {
-            const { Messages } = await this.client.send(
-              new ReceiveMessageCommand({
-                QueueUrl: this.config.SQS_WAGER_QUEUE_URL,
-                MaxNumberOfMessages: 1,
-                WaitTimeSeconds: this.config.SQS_POLL_WAIT_SECONDS,
-                VisibilityTimeout: this.config.SQS_VISIBILITY_TIMEOUT_SECONDS,
-                MessageSystemAttributeNames: ["ApproximateReceiveCount", "MessageGroupId"],
-              }),
-              {
-                abortSignal: AbortSignal.any([
-                  signal,
-                  AbortSignal.timeout((this.config.SQS_POLL_WAIT_SECONDS + 5) * 1000),
-                ]),
-              },
-            );
-            const message = Messages?.[0];
-            if (message) {
-              if (signal.aborted && message.ReceiptHandle)
-                await this.changeVisibility(message.ReceiptHandle, 0);
-              else if (!signal.aborted) await this.handle(message);
-            }
-            return Boolean(message);
+            const started = performance.now();
+            const { Messages } = await this.client
+              .send(
+                new ReceiveMessageCommand({
+                  QueueUrl: this.config.SQS_WAGER_QUEUE_URL,
+                  MaxNumberOfMessages: Math.min(batchSize, capacity - index * batchSize),
+                  WaitTimeSeconds: this.config.SQS_POLL_WAIT_SECONDS,
+                  VisibilityTimeout: this.config.SQS_VISIBILITY_TIMEOUT_SECONDS,
+                  MessageSystemAttributeNames: ["ApproximateReceiveCount", "MessageGroupId"],
+                }),
+                {
+                  abortSignal: AbortSignal.any([
+                    signal,
+                    AbortSignal.timeout((this.config.SQS_POLL_WAIT_SECONDS + 5) * 1000),
+                  ]),
+                },
+              )
+              .finally(() =>
+                this.context.metrics?.record(
+                  "wager_sqs_poll_duration_seconds",
+                  (performance.now() - started) / 1000,
+                ),
+              );
+            if (!Messages?.length) return false;
+            await this.processBatch(Messages, signal);
+            return true;
           },
           signal,
           250,
-          (attempt) => this.log("warn", { result: "poll_failed", attempt }),
+          (attempt) =>
+            this.log("warn", { result: "poll_failed", attempt, code: "SQS_POLL_FAILED" }),
+          this.context.metrics,
+          true,
         ),
       ),
     );
   }
 
-  private async handle(message: Message): Promise<void> {
-    const started = performance.now();
-    const attempt = Number(message.Attributes?.ApproximateReceiveCount) || 1;
-    const receipt = message.ReceiptHandle;
-    const transport = { transportMessageId: message.MessageId, attempt };
-    if (!receipt) {
-      this.log("warn", { ...transport, result: "missing_receipt" });
-      return;
+  private async processBatch(messages: Message[], signal: AbortSignal): Promise<void> {
+    const groups = new Map<string, ReturnType<WagerConsumer["lease"]>[]>();
+    this.context.metrics?.record("wager_sqs_events_total", messages.length, "received");
+    for (const message of messages) {
+      const group = message.Attributes?.MessageGroupId ?? "";
+      const entries = groups.get(group) ?? [];
+      entries.push(this.lease(message));
+      groups.set(group, entries);
     }
+    await Promise.all(
+      [...groups.values()].map(async (entries) => {
+        let deferFor: number | undefined;
+        for (const entry of entries) {
+          try {
+            if (signal.aborted || deferFor !== undefined) {
+              await entry.stop();
+              if (entry.message.ReceiptHandle)
+                await this.setVisibility(
+                  entry.message.ReceiptHandle,
+                  deferFor ?? 0,
+                  entry.transport,
+                );
+              this.log("log", { ...entry.transport, result: "deferred" });
+              continue;
+            }
+            const started = performance.now();
+            this.inFlight++;
+            this.context.metrics?.record("wager_sqs_in_flight", this.inFlight);
+            try {
+              deferFor = await this.handle(entry, started);
+            } finally {
+              this.inFlight--;
+              this.context.metrics?.record("wager_sqs_in_flight", this.inFlight);
+              this.context.metrics?.record(
+                "wager_sqs_processing_duration_seconds",
+                (performance.now() - started) / 1000,
+              );
+            }
+          } finally {
+            await entry.stop();
+          }
+        }
+      }),
+    );
+  }
 
-    let command: ProcessWagerCommand | undefined;
-    let result: Awaited<ReturnType<ProcessWagerTransactionUseCase["execute"]>>;
-    try {
-      command = parseWagerMessage(message.Body, this.config.SQS_CONSUMER_NAME);
-      const heartbeatStop = new AbortController();
-      const heartbeat = this.heartbeat(receipt, heartbeatStop.signal, {
-        ...transport,
-        ...this.trace(command),
-      });
-      try {
-        result = await this.processor.execute(command);
-      } finally {
-        heartbeatStop.abort();
+  private lease(message: Message) {
+    const count = Number(message.Attributes?.ApproximateReceiveCount);
+    const attempt = Number.isSafeInteger(count) && count > 0 ? count : 1;
+    const transport = {
+      transportMessageId: message.MessageId,
+      messageId: message.MessageId,
+      correlationId: message.MessageId,
+      receiveCount: attempt,
+      attempt,
+    };
+    const abort = new AbortController();
+    const heartbeat = message.ReceiptHandle
+      ? this.heartbeat(message.ReceiptHandle, abort.signal, transport)
+      : undefined;
+    return {
+      message,
+      transport,
+      stop: async () => {
+        abort.abort();
         await heartbeat;
-      }
-    } catch (error) {
-      const { permanent, code } = classify(error);
-      const exhausts = attempt >= this.config.SQS_MAX_RECEIVE_COUNT;
-      const delay = permanent || exhausts ? 0 : retryDelay(attempt, 1, 30);
-      try {
-        await this.changeVisibility(receipt, delay);
-      } catch {
-        this.log("warn", {
-          ...transport,
-          ...this.trace(command),
-          result: "visibility_change_failed",
-        });
-      }
+      },
+    };
+  }
+
+  private async handle(
+    { message, transport, stop }: ReturnType<WagerConsumer["lease"]>,
+    started: number,
+  ): Promise<number | undefined> {
+    const { attempt } = transport;
+    const receipt = message.ReceiptHandle;
+    if (!receipt) {
       this.log("warn", {
         ...transport,
-        ...this.trace(command),
+        result: "missing_receipt",
+        code: "SQS_MISSING_RECEIPT",
+      });
+      return this.config.SQS_VISIBILITY_TIMEOUT_SECONDS;
+    }
+
+    let result: Awaited<ReturnType<ProcessWagerTransactionUseCase["execute"]>>;
+    try {
+      const command = parseWagerMessage(message.Body, this.config.SQS_CONSUMER_NAME);
+      Object.assign(transport, this.trace(command));
+      result = await observeWager(this.context.metrics, "sqs", () =>
+        this.processor.execute(command),
+      );
+    } catch (error) {
+      await stop();
+      const { permanent, code } = classifyWagerFailure(error);
+      const exhausts = attempt >= this.config.SQS_MAX_RECEIVE_COUNT;
+      const delay = permanent || exhausts ? 0 : retryDelay(attempt, 1, 30);
+      if (!permanent && !exhausts)
+        this.context.metrics?.record("wager_processing_retries_total", 1, "sqs");
+      const scheduled = await this.setVisibility(receipt, delay, transport);
+      this.log("warn", {
+        ...transport,
         code,
         durationMs: Math.round(performance.now() - started),
         delaySeconds: delay,
         result: exhausts ? "awaiting_dlq" : permanent ? "permanent_failure" : "retry",
       });
-      return;
+      return scheduled ? delay : this.config.SQS_VISIBILITY_TIMEOUT_SECONDS;
     }
 
     const details = {
       ...transport,
-      ...this.trace(command),
       transactionId: result.transactionId,
       status: result.status,
+      code: result.failureCode,
       durationMs: Math.round(performance.now() - started),
     };
+    this.context.metrics?.record("wager_sqs_events_total", 1, "processed");
+    if (result.status === WagerTransactionStatus.Rejected)
+      this.context.metrics?.record("wager_sqs_events_total", 1, "rejected");
+    if (result.idempotentReplay)
+      this.context.metrics?.record("wager_sqs_events_total", 1, "duplicate");
     try {
       await this.client.send(
         new DeleteMessageCommand({
@@ -133,12 +211,15 @@ export class WagerConsumer {
         }),
         { abortSignal: AbortSignal.timeout(3_000) },
       );
+      this.context.metrics?.record("wager_sqs_events_total", 1, "acknowledged");
       this.log("log", {
         ...details,
         result: result.idempotentReplay ? "duplicate" : "acknowledged",
       });
+      return undefined;
     } catch {
-      this.log("warn", { ...details, result: "ack_failed" });
+      this.log("warn", { ...details, code: "SQS_ACK_FAILED", result: "ack_failed" });
+      return this.config.SQS_VISIBILITY_TIMEOUT_SECONDS;
     }
   }
 
@@ -151,9 +232,28 @@ export class WagerConsumer {
       try {
         await this.changeVisibility(receipt, this.config.SQS_VISIBILITY_TIMEOUT_SECONDS, signal);
       } catch {
-        if (!signal.aborted) this.log("warn", { ...trace, result: "visibility_extension_failed" });
+        if (!signal.aborted)
+          this.log("warn", {
+            ...trace,
+            code: "SQS_VISIBILITY_FAILED",
+            result: "visibility_extension_failed",
+          });
         break;
       }
+    }
+  }
+
+  private async setVisibility(receipt: string, delay: number, transport: object): Promise<boolean> {
+    try {
+      await this.changeVisibility(receipt, delay);
+      return true;
+    } catch {
+      this.log("warn", {
+        ...transport,
+        code: "SQS_VISIBILITY_FAILED",
+        result: "visibility_change_failed",
+      });
+      return false;
     }
   }
 
@@ -175,19 +275,30 @@ export class WagerConsumer {
     );
   }
 
-  private trace(command: ProcessWagerCommand | undefined) {
+  private trace(command: ProcessWagerCommand) {
     return {
-      messageId: command?.inbox?.messageId,
-      walletId: command?.walletId,
-      providerId: command?.providerId,
-      correlationId: command?.correlationId,
+      messageId: command.inbox?.messageId,
+      walletId: command.walletId,
+      providerId: command.providerId,
+      correlationId: command.correlationId,
+      causationId: command.causationId ?? command.inbox?.messageId,
+      operation: command.kind,
     };
   }
 
-  private log(level: "log" | "warn", fields: object): void {
+  private log(level: "log" | "warn", fields: { result: string } & Record<string, unknown>): void {
+    if (fields.result !== "duplicate" && fields.result !== "acknowledged") {
+      this.context.metrics?.record("wager_sqs_events_total", 1, fields.result);
+    }
+    if (["awaiting_dlq", "permanent_failure", "retry", "missing_receipt"].includes(fields.result)) {
+      this.context.metrics?.record("wager_sqs_events_total", 1, "failed");
+    }
     this.context.logger[level](
       {
         ...fields,
+        event: `sqs.message.${fields.result}`,
+        instanceId: this.context.workerInstanceId,
+        workerType: "consumer",
         consumerName: this.config.SQS_CONSUMER_NAME,
         workerInstanceId: this.context.workerInstanceId,
       },

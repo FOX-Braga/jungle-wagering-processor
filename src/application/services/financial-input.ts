@@ -13,6 +13,7 @@ export function identifier(value: string, field: string): string {
 export function traceIdentifiers(trace: EventTrace): void {
   if (trace.correlationId !== undefined) identifier(trace.correlationId, "correlationId");
   if (trace.causationId !== undefined) identifier(trace.causationId, "causationId");
+  if (trace.sourceMessageId !== undefined) identifier(trace.sourceMessageId, "sourceMessageId");
 }
 
 export function commandMoney(props: MoneyProps): Money {

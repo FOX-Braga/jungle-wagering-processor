@@ -1,4 +1,4 @@
-# Testar a Fase 5 no Postman
+# Testar a API financeira no Postman
 
 Abra o PowerShell na raiz e inicie a API local. O pgAdmin pode usar o banco local na porta `5432`, conforme o `.env` da API. Use o Compose para o MiniStack local.
 
@@ -17,6 +17,12 @@ Se o status indicar migrations pendentes no banco do seu `.env`, execute `bun ru
 4. Confira o resultado de cada requisição em **Test Results**. Para executar à mão, siga a mesma ordem a partir de **Wallets → Criar carteira com 100.00 BRL**.
 
 O roteiro abre com `100.00`, debita `25.00`, credita `50.00`, mantém saldo e versão na LOSS e repete a BET com saldo histórico de `75.00`. Depois restitui a aposta e reverte a restituição. A reconciliação final espera `125.00` em cinco lançamentos. A coleção inclui respostas esperadas de `400`, `409` e `422`.
+
+Para usar a mesma coleção via terminal, instale Node para o Newman e execute o comando abaixo com a API local saudável. A rodada final executou 21 requisições e 73 asserções, com zero falhas.
+
+```powershell
+bunx newman@6.2.3 run postman/Jungle-Wagering-Processor.postman_collection.json -e postman/Jungle-Local.postman_environment.json --env-var baseUrl=http://127.0.0.1:3000
+```
 
 | Sintoma                                                                         | Conferência                                                                                                    |
 | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |

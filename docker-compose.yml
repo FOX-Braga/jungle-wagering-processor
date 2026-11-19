@@ -2,8 +2,11 @@ name: jungle-wagering-phase1
 
 x-app-environment: &app-environment
   NODE_ENV: production
+  ALLOW_LOCAL_SERVICES: "true"
   PORT: "3000"
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  HTTP_MAX_IN_FLIGHT: ${HTTP_MAX_IN_FLIGHT:-128}
+  METRICS_PORT: ${METRICS_PORT:-0}
   SHUTDOWN_TIMEOUT_MS: ${SHUTDOWN_TIMEOUT_MS:-10000}
   DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://${POSTGRES_USER:-jungle}:${POSTGRES_PASSWORD:-jungle_dev}@postgres:5432/${POSTGRES_DB:-jungle}}
   AWS_REGION: ${AWS_REGION:-us-east-1}
@@ -17,6 +20,7 @@ x-app-environment: &app-environment
   SQS_VISIBILITY_TIMEOUT_SECONDS: ${SQS_VISIBILITY_TIMEOUT_SECONDS:-30}
   SQS_MAX_RECEIVE_COUNT: ${SQS_MAX_RECEIVE_COUNT:-3}
   SQS_CONSUMER_CONCURRENCY: ${SQS_CONSUMER_CONCURRENCY:-4}
+  SQS_CONSUMER_BATCH_SIZE: ${SQS_CONSUMER_BATCH_SIZE:-1}
   SQS_CONSUMER_NAME: ${SQS_CONSUMER_NAME:-wager-processor}
   OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-25}
   OUTBOX_POLL_INTERVAL_MS: ${OUTBOX_POLL_INTERVAL_MS:-1000}
@@ -95,6 +99,9 @@ services:
   api:
     <<: *app
     init: true
+    environment:
+      <<: *app-environment
+      METRICS_SHARED_INTERVAL_MS: ${METRICS_SHARED_INTERVAL_MS:-0}
     ports:
       - "127.0.0.1:${PORT:-3000}:3000"
     depends_on:

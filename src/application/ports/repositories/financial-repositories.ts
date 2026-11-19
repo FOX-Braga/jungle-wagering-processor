@@ -34,6 +34,10 @@ export interface PendingReferenceCandidate {
   readonly walletId: string;
   readonly providerId: string;
   readonly referenceAttempts: number;
+  readonly createdAtMs?: number;
+  readonly correlationId?: string | null;
+  readonly causationId?: string | null;
+  readonly sourceMessageId?: string | null;
 }
 
 export interface WagerTransactionRepository {
@@ -100,7 +104,12 @@ export interface OutboxRepository {
   findById(id: string): Promise<OutboxMessage | undefined>;
   insert(message: OutboxMessage): Promise<void>;
   findDue(now: Date, limit: number): Promise<OutboxMessage[]>;
-  claimDue(now: Date, limit: number, claim: OutboxClaim): Promise<OutboxMessage[]>;
+  claimDue(
+    now: Date,
+    limit: number,
+    claim: OutboxClaim,
+    onRecovery?: () => void,
+  ): Promise<OutboxMessage[]>;
   saveDelivery(message: OutboxMessage, claim?: OutboxClaim): Promise<boolean>;
 }
 

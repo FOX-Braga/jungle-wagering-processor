@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { MikroTransactionManager } from "../../../src/infrastructure/persistence/transaction/mikro-transaction-manager";
+import { command, financialApplication } from "../../helpers/application-fixtures";
 import { at } from "../../helpers/domain";
 import { failureFrom } from "../../helpers/failure-from";
 import { opening } from "../../helpers/financial-fixtures";
@@ -47,6 +48,8 @@ test("up, down and reapply recreate tables, columns, constraints, indexes and tr
     "Migration20261118000200",
     "Migration20261118000300",
     "Migration20261118000400",
+    "Migration20261118000500",
+    "Migration20261118000600",
   ]);
 
   const first = await snapshot();
@@ -67,8 +70,11 @@ test("up, down and reapply recreate tables, columns, constraints, indexes and tr
     "ck_ledger_arithmetic",
     "uq_wager_processed_reversal",
     "ix_outbox_due",
+    "ix_outbox_pending_reference_trace",
     "ledger_append_only",
     "require_processed_ledger",
+    "fk_inbox_wager",
+    "ck_inbox_transaction_completed",
   ]) {
     expect(first.some(({ name }) => name === invariant)).toBe(true);
   }
@@ -80,7 +86,7 @@ test("up, down and reapply recreate tables, columns, constraints, indexes and tr
     .execute<{ exists: boolean }[]>("select to_regnamespace('wagering') is not null as exists");
   expect(row?.exists).toBe(false);
   expect(await migrator.getExecutedMigrations()).toEqual([]);
-  expect(await migrator.up()).toHaveLength(5);
+  expect(await migrator.up()).toHaveLength(applied.length);
   expect(await snapshot()).toEqual(first);
   expect(await migrator.up()).toEqual([]);
   expect(await migrator.getPendingMigrations()).toEqual([]);
@@ -98,6 +104,54 @@ test("refuses financial rollback after a wallet exists", async () => {
   expect((await manager.execute((repos) => repos.wallets.findById(wallet.id)))?.version).toBe(1);
   expect(await migrator.getPendingMigrations()).toEqual([]);
 });
+
+test("upgrades populated legacy receipts and guards new transaction links", async () => {
+  const legacy = await createTestDatabase(false);
+  try {
+    const migrator = legacy.orm.getMigrator();
+    await migrator.up({ to: "Migration20261118000500" });
+    const conn = legacy.orm.em.getConnection();
+    await conn.execute(`
+      insert into wagering.inbox_messages(consumer_name, message_id, payload_hash, received_at, processed_at)
+      values ('worker', 'legacy', 'legacy-hash', now(), now())
+    `);
+    await migrator.up();
+    const app = financialApplication(legacy.orm);
+    const receipt = await app.manager.execute(({ inbox }) => inbox.find("worker", "legacy"));
+    expect(receipt?.isProcessed()).toBe(true);
+    expect(receipt?.payloadHash).toBe("legacy-hash");
+    expect(receipt?.transactionId).toBeUndefined();
+    const wallet = await app.open();
+    const wager = await app.process.execute(
+      command(wallet, undefined, "25.00", {
+        inbox: { consumerName: "worker", messageId: "new" },
+      }),
+    );
+    const linked = await app.manager.execute(({ inbox }) => inbox.find("worker", "new"));
+    expect(linked?.transactionId).toBe(wager.transactionId);
+    const insert = (processed: boolean, id: string) =>
+      conn.execute(
+        `
+      insert into wagering.inbox_messages(consumer_name, message_id, payload_hash, received_at, processed_at, transaction_id)
+      values ('worker', 'invalid', 'hash', now(), case when ? then now() else null end, ?)
+    `,
+        [processed, id],
+      );
+    expect(await failureFrom(insert(false, wager.transactionId))).toHaveProperty(
+      "constraint",
+      "ck_inbox_transaction_completed",
+    );
+    expect(await failureFrom(insert(true, randomUUID()))).toHaveProperty(
+      "constraint",
+      "fk_inbox_wager",
+    );
+    expect((await failureFrom(migrator.down({ to: "Migration20261118000500" }))).message).toMatch(
+      /populated inbox/,
+    );
+  } finally {
+    await legacy.close();
+  }
+}, 15_000);
 
 test("a restricted role can post a valid ledger but cannot write the projection, truncate or do DDL", async () => {
   await database.orm.getMigrator().up();

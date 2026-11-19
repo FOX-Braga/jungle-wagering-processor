@@ -41,7 +41,7 @@ export class MikroInboxRepository implements InboxRepository {
   }
 
   async saveProcessed(message: InboxMessage): Promise<void> {
-    const { consumerName, messageId, payloadHash, processedAt } = message;
+    const { consumerName, messageId, payloadHash, processedAt, transactionId } = message;
     if (!processedAt) throw new Error("Inbox message has no processing date");
     const updated = await this.em.nativeUpdate(
       InboxRow,
@@ -51,7 +51,7 @@ export class MikroInboxRepository implements InboxRepository {
         payloadHash,
         processedAt: null,
       },
-      { processedAt },
+      { processedAt, transactionId: transactionId ?? null },
     );
     if (updated !== 1) throw new Error("Inbox message is absent, changed or already processed");
   }
@@ -76,7 +76,12 @@ export class MikroOutboxRepository implements OutboxRepository {
     return rows.map(toOutbox);
   }
 
-  async claimDue(now: Date, limit: number, claim: OutboxClaim): Promise<OutboxMessage[]> {
+  async claimDue(
+    now: Date,
+    limit: number,
+    claim: OutboxClaim,
+    onRecovery?: () => void,
+  ): Promise<OutboxMessage[]> {
     if (!Number.isFinite(claim.until.getTime()) || claim.until <= now || !claim.owner.trim()) {
       throw new RangeError("Outbox claim requires a future expiry and an owner");
     }
@@ -84,6 +89,7 @@ export class MikroOutboxRepository implements OutboxRepository {
       .setLockMode(LockMode.PESSIMISTIC_PARTIAL_WRITE)
       .getResultList();
     for (const row of rows) {
+      if (row.claimUntil) onRecovery?.();
       row.claimOwner = claim.owner;
       row.claimUntil = claim.until;
     }

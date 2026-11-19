@@ -1,10 +1,4 @@
-import {
-  Catch,
-  HttpException,
-  Logger,
-  type ArgumentsHost,
-  type ExceptionFilter,
-} from "@nestjs/common";
+import { Catch, HttpException, type ArgumentsHost, type ExceptionFilter } from "@nestjs/common";
 import type { ServerResponse } from "node:http";
 import {
   ApplicationError,
@@ -86,13 +80,12 @@ function problem(error: unknown): { status: number; code: string; message: strin
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger("HTTP");
-
   catch(error: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
     const response = http.getResponse<ServerResponse>();
     if (response.headersSent || response.destroyed) return;
-    const { correlationId } = getRequestContext(http.getRequest<HttpRequest>());
+    const context = getRequestContext(http.getRequest<HttpRequest>());
+    const { correlationId } = context;
     response.setHeader(correlationHeader, correlationId);
     response.setHeader("content-type", "application/json; charset=utf-8");
 
@@ -103,7 +96,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     const { status, code, message } = problem(error);
-    if (status === 500) this.logger.error({ correlationId, code });
+    context.errorCode = code;
+    if (error instanceof PersistenceConflictError) {
+      context.event = "wallet.lock.conflict";
+    } else if (
+      ["IDEMPOTENCY_CONFLICT", "EXTERNAL_TRANSACTION_CONFLICT", "INBOX_CONFLICT"].includes(code)
+    ) {
+      context.event = "wager.idempotency.conflict";
+    }
     if (status === 503) response.setHeader("retry-after", "1");
     response.statusCode = status;
     response.end(JSON.stringify({ error: { code, message, correlationId } }));

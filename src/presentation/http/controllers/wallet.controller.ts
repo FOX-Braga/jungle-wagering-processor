@@ -1,15 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  Inject,
-  Logger,
-  Param,
-  Post,
-  Query,
-  Req,
-} from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Req } from "@nestjs/common";
 import {
   ApiBody,
   ApiCreatedResponse,
@@ -49,9 +38,6 @@ function publicWallet({ id, playerId, balance, version }: WalletResult) {
 @ApiTags("Wallets")
 @Controller("wallets")
 export class WalletController {
-  private readonly logger = new Logger("Reconciliation");
-  private divergences = 0;
-
   constructor(
     @Inject(CreateWalletUseCase) private readonly createWallet: CreateWalletUseCase,
     @Inject(GetWalletUseCase) private readonly getWallet: GetWalletUseCase,
@@ -121,15 +107,22 @@ export class WalletController {
   async reconcile(@Param() { walletId }: WalletParams, @Req() request: HttpRequest) {
     const context = getRequestContext(request);
     context.walletId = walletId;
-    const audit = await this.reconcileWallet.execute(walletId);
-    if (!audit.consistent) {
-      this.logger.warn({
-        ...context,
-        metric: "reconciliation_divergences_total",
-        value: ++this.divergences,
-        checkedEntries: audit.checkedEntries,
-      });
+    const started = performance.now();
+    try {
+      const audit = await this.reconcileWallet.execute(walletId);
+      context.event = audit.consistent ? "reconciliation.completed" : "reconciliation.divergence";
+      context.outcome = audit.consistent ? "consistent" : "divergent";
+      context.checkedEntries = audit.checkedEntries;
+      request.metrics?.record("wager_reconciliation_total", 1, context.outcome);
+      return audit;
+    } catch (error) {
+      request.metrics?.record("wager_reconciliation_total", 1, "error");
+      throw error;
+    } finally {
+      request.metrics?.record(
+        "wager_reconciliation_duration_seconds",
+        (performance.now() - started) / 1000,
+      );
     }
-    return audit;
   }
 }

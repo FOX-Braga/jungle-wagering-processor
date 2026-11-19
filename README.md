@@ -1,10 +1,44 @@
 # Jungle Wagering Processor
 
-Processador financeiro distribuído do desafio técnico da Jungle Gaming. A API REST e o consumidor SQS compartilham o mesmo [motor financeiro](docs/FINANCIAL_PROCESSING.md), com saldo decimal exato, ledger imutável e idempotência no PostgreSQL. A Fase 6 coloca em operação a Inbox transacional, a publicação concorrente pela Outbox e a recuperação de referências fora de ordem. [Enunciado original](docs/challenge/README.original.md) · [Arquitetura](ARCHITECTURE.md) · [Matriz de requisitos](docs/REQUIREMENTS_MATRIX.md) · [Plano de testes](docs/TEST_PLAN.md)
+Processador financeiro distribuído do desafio técnico da Jungle Gaming. A API REST e o consumer SQS compartilham o motor financeiro. PostgreSQL protege o saldo exato, o ledger imutável e a idempotência entre processos e canais. A Inbox protege o efeito financeiro após redelivery. A Outbox publica eventos confirmados com entrega at-least-once. [Enunciado original](docs/challenge/README.original.md) · [Arquitetura](ARCHITECTURE.md) · [Matriz final](docs/FINAL_REQUIREMENTS_MATRIX.md) · [Relatório final](docs/FINAL_TEST_REPORT.md)
+
+## Roteiro de avaliação
+
+Com Bun e Docker no `PATH`, execute na raiz do projeto. O Compose usa as portas locais 3000, 5434 e 4567. pgAdmin, Postman e AWS CLI são opcionais.
+
+```powershell
+bun install --frozen-lockfile
+docker compose --env-file .env.example --profile workers up -d --build --wait
+bun run demo:financial
+bun run test:all
+bun run demo:inbox
+bun run test:load
+```
+
+A demo financeira confere as seis operações, o saldo histórico e cinco lançamentos. A regressão inclui três APIs e três consumers independentes, 50 chamadas idênticas, duas BET disputando saldo e falhas controladas. A demo da Inbox reproduz o crash depois do commit e antes do ACK. O benchmark executa oito cenários e encerra com auditoria de saldo e ledger. [Roteiro técnico](docs/TECHNICAL_PRESENTATION.md) · [Resultados de carga](docs/LOAD_TEST_REPORT.md) · [Checklist eliminatório](docs/ELIMINATORY_CHECKLIST.md)
+
+Use `bun run infra:down` para finalizar o Compose preservando volumes locais. Os testes e a carga usam bancos e filas descartáveis. A API de avaliação opera em rede local com a extensão OIDC documentada. O ensaio SQS usa MiniStack. [Runbook](docs/OPERATIONS_RUNBOOK.md) · [Revisão de segurança](docs/SECURITY_REVIEW.md)
 
 ## Stack
 
 Bun 1.4.4, TypeScript 5.9.3 em modo estrito, NestJS 11.2.10, MikroORM 6.6.18, PostgreSQL 16.11, AWS SDK v3 e MiniStack 1.5.38. O `bun.lock` fixa a árvore de dependências.
+
+## Operação e auditoria
+
+```powershell
+bun run doctor
+bun run diagnostics:operations
+bun run audit:wallets
+bun run audit:wallets --limit 100 --batch-size 25
+bun run test:observability
+bun run test:audit
+bun run test:security
+bun run test:recovery
+```
+
+Configure `METRICS_PORT` para consultar `/metrics` no loopback do processo. Habilite `METRICS_SHARED_INTERVAL_MS=30000` em uma única API por ambiente para acompanhar outbox, inbox, DLQ e referências. Em modo local, defina as variáveis em PowerShell ou em `.env`. O Compose recebe os mesmos valores e mantém as portas de métricas internas. [Observabilidade](docs/OBSERVABILITY.md) · [Runbook](docs/OPERATIONS_RUNBOOK.md)
+
+A reconciliação HTTP e a auditoria CLI são somente leitura. O relatório da fase registra os testes executados e o ambiente usado. [Reconciliação](docs/RECONCILIATION.md) · [Segurança](docs/SECURITY.md) · [Relatório da Fase 7](docs/PHASE_7_REPORT.md)
 
 ## Pré-requisitos
 
@@ -99,16 +133,17 @@ bun run db:migrate:status
 
 ## SQS local
 
-O MiniStack fornece as filas FIFO de solicitações e DLQ e a fila standard `wager-events`. A Inbox confirma a operação após o commit SQL. O redrive padrão move mensagens após três recebimentos sem exclusão. Para iniciar os workers no host, abra um terminal por comando após o provisionamento.
+O MiniStack fornece as filas FIFO de solicitações e DLQ e a fila standard `wager-events`. O consumer confirma a mensagem após o commit da Inbox e do resultado financeiro. O redrive padrão move mensagens após três recebimentos sem exclusão. Para iniciar os workers no host, abra um terminal por comando após o provisionamento.
 
 ```powershell
 bun run worker:consumer
 bun run worker:outbox
 bun run worker:references
 bun run queues:inspect
+bun run demo:inbox
 ```
 
-O fluxo, o contrato de mensagens e a recuperação de eventos estacionados estão documentados. [Arquitetura de mensageria](docs/MESSAGING_ARCHITECTURE.md) · [Runbook](docs/FAILURE_SCENARIOS.md)
+A demo sobe PostgreSQL e MiniStack e usa um banco migrado e filas descartáveis. Ela interrompe um consumer após o commit, valida a reentrega por outro processo e comprova o redrive para a DLQ. [Arquitetura de mensageria](docs/MESSAGING_ARCHITECTURE.md) · [Runbook](docs/OPERATIONS_RUNBOOK.md) · [Relatório da Fase 08](docs/PHASE_8_REPORT.md)
 
 Para listar filas com AWS CLI:
 

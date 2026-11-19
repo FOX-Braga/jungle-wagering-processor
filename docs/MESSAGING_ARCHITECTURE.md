@@ -19,10 +19,12 @@ flowchart LR
 
 ```json
 {
+  "schemaVersion": 1,
   "messageId": "msg-123",
   "type": "WagerTransactionRequested",
   "occurredAt": "2026-07-29T15:00:00.000Z",
   "correlationId": "trace-123",
+  "causationId": "upstream-event-123",
   "data": {
     "providerId": "provider-a",
     "externalTransactionId": "transaction-123",
@@ -37,13 +39,13 @@ flowchart LR
 }
 ```
 
-O corpo aceita até 32 KiB em UTF-8, usa ISO 8601 com fuso e rejeita campos desconhecidos. `correlationId` é opcional e usa o `messageId` lógico por padrão. `occurredAt` identifica o instante do produtor. O processamento usa o relógio da aplicação. `REFUND` e `ROLLBACK` exigem `referenceExternalTransactionId`. `WIN` aceita referência opcional. O contrato de dinheiro e as validações são compartilhados com a API.
+O corpo aceita até 32 KiB em UTF-8, usa ISO 8601 com fuso e rejeita campos desconhecidos. O parser interpreta envelopes legados sem `schemaVersion` como versão 1 e versões incompatíveis seguem pelo redrive. `correlationId` e `causationId` são opcionais. A correlação assume o `messageId` lógico quando ausente. Os eventos da outbox preservam esse ID em `sourceMessageId`. `occurredAt` identifica o instante do produtor. O processamento usa o relógio da aplicação. `REFUND` e `ROLLBACK` exigem `referenceExternalTransactionId`. `WIN` aceita referência opcional. O contrato de dinheiro e as validações são compartilhados com a API.
 
 O produtor deve agrupar por `walletId` e pode usar o ID lógico como `MessageDeduplicationId` para retransmissões idênticas. O SDK recebe `MessageId` e `ReceiptHandle` do broker. O primeiro identifica a entrega nos logs e o segundo autoriza a confirmação. O corpo define o `messageId` da Inbox. Os IDs do transporte e do corpo podem divergir. A operação financeira usa uma chave idempotente global e a identidade `(providerId, externalTransactionId)`. A carteira real e seu proprietário são conferidos pelo motor financeiro, inclusive quando o agrupamento enviado ao SQS difere da carteira.
 
 ## Consumer, Inbox e DLQ
 
-Cada processo tem quatro slots por padrão. Cada slot mantém um long poll independente e solicita uma mensagem por vez. A fila FIFO usa visibilidade de 30 s, long polling de 10 s, retenção padrão de quatro dias e DLQ FIFO com retenção de 14 dias. O redrive nativo move a mensagem original ao ultrapassar três recebimentos sem exclusão. O setup aplica os valores configurados.
+Cada processo recebe até quatro mensagens simultâneas por padrão (`SQS_CONSUMER_CONCURRENCY`). Cada poll solicita uma mensagem por padrão. `SQS_CONSUMER_BATCH_SIZE` permite lotes de até dez, limitados pela capacidade do processo. Dentro de um lote, o worker processa cada grupo em ordem e pode executar grupos diferentes em paralelo. A fila FIFO usa visibilidade de 30 s, long polling de 10 s, retenção padrão de quatro dias e DLQ FIFO com retenção de 14 dias. O redrive nativo move a mensagem original após esgotar os três recebimentos configurados. O setup lê, atualiza e verifica os atributos. Em produção, provisiona SSE gerenciado quando a fila ainda está sem KMS. [Limites de ReceiveMessage](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_ReceiveMessage.html) · [Entrega FIFO](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/FIFO-queues-understanding-logic.html)
 
 ```mermaid
 sequenceDiagram
@@ -68,7 +70,7 @@ sequenceDiagram
   end
 ```
 
-A chave composta da Inbox usa o mesmo `SQS_CONSUMER_NAME` em todas as réplicas. O caso de uso grava o recibo processado, o wager, a projeção, o ledger e a outbox com o mesmo TransactionManager. A restrição de unicidade vence uma disputa entre instâncias e a operação perdedora relê o resultado em uma transação nova. A idempotência de negócio vale também com IDs lógicos distintos e entre HTTP e SQS. Mudar o conteúdo atrelado à mesma identidade resulta em conflito.
+A chave composta da Inbox usa o mesmo `SQS_CONSUMER_NAME` em todas as réplicas. O caso de uso grava o recibo processado, o wager, a projeção, o ledger e a outbox com o mesmo TransactionManager. Novas conclusões vinculam o recibo à operação por `transaction_id`. Recibos legados já concluídos mantêm vínculo nulo, com replay validado pelas identidades financeiras e pelo hash. O estado financeiro é consultado no wager, inclusive para referências que mudam de estado depois do ACK. A restrição de unicidade vence uma disputa entre instâncias e a operação perdedora relê o resultado em uma transação nova. O hash usa a representação canônica da operação e exclui metadados de transporte. A idempotência de negócio vale também com IDs lógicos distintos e entre HTTP e SQS. Mudar o conteúdo atrelado à mesma identidade resulta em conflito.
 
 | Resultado                                                         | Decisão do consumer                                                                            |
 | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -78,7 +80,7 @@ A chave composta da Inbox usa o mesmo `SQS_CONSUMER_NAME` em todas as réplicas.
 | Última tentativa malsucedida                                      | Devolver visibilidade e deixar o broker encaminhar para a DLQ                                  |
 | Falha de `DeleteMessage` ou alteração de visibilidade             | Registrar falha e deixar o SQS recuperar pela expiração                                        |
 
-Durante o trabalho, o consumer renova a visibilidade a cada metade do intervalo, por até cinco minutos. A renovação é cancelada antes do ACK ou reagendamento. Em SIGINT ou SIGTERM, o processo aborta polls ociosos e drena o trabalho ativo até `SHUTDOWN_TIMEOUT_MS`. No vencimento, encerra com código 1. A mensagem volta a ficar disponível quando a visibilidade expirar. Os limites e as semânticas de recebimento, visibilidade e redrive seguem as operações do SQS. [Visibilidade do SQS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html)
+O consumer renova a visibilidade a cada metade do intervalo, por até cinco minutos. A renovação cobre mensagens aguardando sua vez no lote e termina no ACK ou no reagendamento. Uma falha bloqueia o processamento das mensagens seguintes do mesmo grupo naquele lote. O broker contabiliza o recebimento das mensagens adiadas. Com lotes maiores, uma sequência de falhas no início do grupo pode consumir o limite de recebimentos das mensagens seguintes. Em falhas de polling, a espera cresce de 250 ms até um teto de 30 s, com jitter. Em SIGINT ou SIGTERM, o processo aborta polls, devolve mensagens recebidas que ainda aguardam processamento e drena o trabalho ativo até `SHUTDOWN_TIMEOUT_MS`. No vencimento, encerra com código 1 e o SQS recupera entregas pendentes após a visibilidade expirar. [Visibilidade do SQS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html)
 
 ## Publisher da Outbox
 
@@ -124,4 +126,4 @@ O próximo retry usa backoff de 1 s até 60 s. O limite é de dez verificações
 
 ## Operação
 
-Os logs JSON registram identidade da instância, resultado, IDs de rastreamento aplicáveis, tentativa e latência ou lag. `bun run queues:inspect` consulta atributos, retenção, redrive e profundidades aproximadas. O runbook inclui consultas de backlog, pendências e estacionados. Contadores, alertas e painéis ficam para a Fase 7. [Cenários e runbook](FAILURE_SCENARIOS.md) · [Demonstração](RESILIENCE_DEMO.md)
+Os logs JSON registram identidade da instância, resultado, IDs de rastreamento aplicáveis, tentativa e latência ou lag. `wager_sqs_events_total` registra recebimentos, resultados de processamento, duplicatas, rejeições, falhas e ACKs. `wager_sqs_processing_duration_seconds` registra a latência de processamento. `bun run queues:inspect` consulta atributos, retenção, redrive e profundidades aproximadas. `bun run demo:inbox` valida interrupção após commit, reentrega, DLQ e auditoria financeira com recursos descartáveis. [Runbook operacional](OPERATIONS_RUNBOOK.md) · [Catálogo de métricas](OBSERVABILITY.md)

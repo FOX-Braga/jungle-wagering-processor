@@ -7,10 +7,12 @@ import {
 } from "../../application/services/wager-contract";
 
 const schema = z.strictObject({
+  schemaVersion: z.literal(1).optional(),
   messageId: requestIdentifier,
   type: z.literal("WagerTransactionRequested"),
   occurredAt: z.iso.datetime({ offset: true }),
   correlationId: requestIdentifier.optional(),
+  causationId: requestIdentifier.optional(),
   data: wagerSchema({ idempotencyKey }),
 });
 
@@ -30,8 +32,13 @@ export function parseWagerMessage(
     throw new InvalidWagerMessage("INVALID_JSON");
   }
   const parsed = schema.safeParse(json);
-  if (!parsed.success) throw new InvalidWagerMessage("INVALID_ENVELOPE");
-  const { data, messageId, correlationId } = parsed.data;
+  if (!parsed.success) {
+    const invalidVersion = parsed.error.issues.some(({ path }) => path[0] === "schemaVersion");
+    throw new InvalidWagerMessage(
+      invalidVersion ? "UNSUPPORTED_SCHEMA_VERSION" : "INVALID_ENVELOPE",
+    );
+  }
+  const { data, messageId, correlationId, causationId } = parsed.data;
   return {
     providerId: data.providerId,
     externalTransactionId: data.externalTransactionId,
@@ -47,6 +54,7 @@ export function parseWagerMessage(
       ? { referenceExternalTransactionId: data.referenceExternalTransactionId }
       : {}),
     correlationId: correlationId ?? messageId,
+    ...(causationId ? { causationId } : {}),
     inbox: { consumerName, messageId },
   };
 }

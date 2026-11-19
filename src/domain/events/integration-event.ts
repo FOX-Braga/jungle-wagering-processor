@@ -6,6 +6,7 @@ export interface EventContext {
   readonly eventId: string;
   readonly correlationId: string;
   readonly causationId?: string;
+  readonly sourceMessageId?: string;
 }
 
 export interface IntegrationEventProps<T extends JsonObject> extends EventContext {
@@ -30,21 +31,24 @@ export abstract class IntegrationEvent<T extends JsonObject> {
   readonly aggregateId: string;
   readonly correlationId: string;
   readonly causationId: string | undefined;
+  readonly sourceMessageId: string | undefined;
   readonly data: Readonly<T>;
   readonly #occurredAt: number;
 
   protected constructor(props: IntegrationEventProps<T>) {
-    const { eventId, aggregateId, correlationId, causationId } = props;
+    const { eventId, aggregateId, correlationId, causationId, sourceMessageId } = props;
     requireFields(FailureCode.InvalidEvent, {
       eventId,
       aggregateId,
       correlationId,
       ...(causationId !== undefined ? { causationId } : {}),
+      ...(sourceMessageId !== undefined ? { sourceMessageId } : {}),
     });
     this.eventId = eventId;
     this.aggregateId = aggregateId;
     this.correlationId = correlationId;
     this.causationId = causationId;
+    this.sourceMessageId = sourceMessageId;
     this.#occurredAt = timestamp(props.occurredAt, FailureCode.InvalidEvent);
     this.data = jsonSnapshot(props.data);
   }
@@ -60,6 +64,7 @@ export abstract class IntegrationEvent<T extends JsonObject> {
       aggregateId: this.aggregateId,
       correlationId: this.correlationId,
       ...(this.causationId === undefined ? {} : { causationId: this.causationId }),
+      ...(this.sourceMessageId === undefined ? {} : { sourceMessageId: this.sourceMessageId }),
       occurredAt: this.occurredAt.toISOString(),
       version: this.version,
       data: this.data,

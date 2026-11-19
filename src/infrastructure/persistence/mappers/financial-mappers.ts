@@ -171,6 +171,7 @@ export function inboxRow(message: InboxMessage): InboxRow {
     payloadHash: message.payloadHash,
     receivedAt: message.receivedAt,
     processedAt: message.processedAt ?? null,
+    transactionId: message.transactionId ?? null,
   };
 }
 
@@ -181,6 +182,7 @@ export function toInbox(row: InboxRow): InboxMessage {
     payloadHash: row.payloadHash,
     receivedAt: row.receivedAt,
     ...(row.processedAt ? { processedAt: row.processedAt } : {}),
+    ...(row.transactionId ? { transactionId: row.transactionId } : {}),
   });
 }
 

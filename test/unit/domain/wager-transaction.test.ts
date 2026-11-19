@@ -332,6 +332,51 @@ test("rejects invalid reference kinds and unsuccessful terminal references", () 
   expect(wallet.balance.toString()).toBe("100.00");
 });
 
+test.each([
+  [Kind.Refund, Kind.Win],
+  [Kind.Refund, Kind.Loss],
+  [Kind.Refund, Kind.Refund],
+  [Kind.Refund, Kind.Rollback],
+  [Kind.Rollback, Kind.Loss],
+  [Kind.Rollback, Kind.Rollback],
+] as const)("%s refuses a processed %s as a reversal target", (kind, sourceKind) => {
+  const sourceNeedsReference = sourceKind === Kind.Refund || sourceKind === Kind.Rollback;
+  const source = wager(sourceKind, {
+    ...(sourceNeedsReference ? { referenceExternalTransactionId: "bet" } : {}),
+  });
+  source.markProcessed(sourceNeedsReference ? finishedBet() : undefined, at());
+  const reversal = wager(kind, {
+    externalTransactionId: "second-operation",
+    referenceExternalTransactionId: source.externalTransactionId,
+  });
+  const wallet = walletWith();
+  expect(reversal.apply(wallet, application(10, source))).toEqual({
+    status: Status.Rejected,
+    failureCode: FailureCode.ReferenceTypeNotAllowed,
+  });
+  expect(wallet.balance.toString()).toBe("100.00");
+  expect(wallet.version).toBe(1);
+});
+
+test.each([Kind.Refund, Kind.Rollback])(
+  "%s waits for an unfinished reference and rejects a failed source",
+  (kind) => {
+    const source = wager(Kind.Bet);
+    const reversal = wager(kind, { referenceExternalTransactionId: source.externalTransactionId });
+    const wallet = walletWith();
+    expect(reversal.apply(wallet, application(10, source))).toEqual({
+      status: Status.PendingReference,
+    });
+    source.reject(FailureCode.InsufficientFunds);
+    expect(reversal.apply(wallet, application(20, source))).toEqual({
+      status: Status.Rejected,
+      failureCode: FailureCode.InvalidReference,
+    });
+    expect(wallet.balance.toString()).toBe("100.00");
+    expect(wallet.version).toBe(1);
+  },
+);
+
 test.each([Kind.Bet, Kind.Win, Kind.Refund])("ROLLBACK reverses a processed %s exactly", (kind) => {
   const wallet = walletWith();
   const entries: WalletLedgerEntry[] = [];

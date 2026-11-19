@@ -5,7 +5,7 @@ export const TRANSACTION_MANAGER = Symbol("TRANSACTION_MANAGER");
 export interface TransactionManager {
   execute<T>(
     work: (repositories: FinancialRepositories) => Promise<T>,
-    options?: { readonly lockTimeoutMs?: number },
+    options?: { readonly lockTimeoutMs?: number; readonly readOnly?: boolean },
   ): Promise<T>;
 }
 

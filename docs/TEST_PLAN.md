@@ -48,3 +48,27 @@ A suíte da Fase 2 executa os quatro cenários financeiros do roteiro, a matriz 
 Os testes de mensageria criam bancos e filas com nomes únicos e removem somente esses recursos. [Runbook](FAILURE_SCENARIOS.md) · [Relatório da Fase 6](PHASE_6_REPORT.md)
 
 Cada teste financeiro deve comparar, em representação exata, o saldo materializado com créditos menos débitos reconstruídos a partir do ledger.
+
+## Etapa 07 — Observabilidade, auditoria e segurança
+
+- `test:observability` cobre formato e redaction, correlação, isolamento assíncrono, limites das labels, loopback e deadline compartilhado.
+- `test:audit` usa conexões PostgreSQL independentes, carteira zerada, movimentos, rejeição, precisão acima do intervalo seguro de inteiros em centavos, divergência de leitura simulada e exit codes.
+- `test:security` aplica os grants a logins reais e verifica restrições de DDL e escrita no ledger. Também valida o perfil de configuração de produção.
+- `test:recovery` inclui cortes TCP isolados de PostgreSQL e SQS, readiness durante falhas, limite de admissão, contenção, DLQ, lag, recuperação de publisher e resolução de referência com correlação preservada.
+
+## Etapa 08 — SQS Consumer e Transactional Inbox
+
+- `test:unit` cobre envelopes legados e versão 1, classificação de falhas, backoff, jitter e cancelamento de polling.
+- `test:db:migrations` cobre recibos legados em banco populado, FK para wager, gravação do vínculo no commit e recusa de rollback com vínculos existentes.
+- `test:messaging` cobre HTTP/SQS, redrive e shutdown de um lote FIFO durante trabalho ativo.
+- `test:distributed` comprova três consumidores simultâneos, 50 entregas, disputa de saldo, concorrência com mesmo ID lógico e conflito entre carteiras.
+- `test:inbox-recovery` interrompe o processo após commit e antes de ACK, comprova reentrega, redrive e integridade financeira em banco e filas descartáveis. `demo:inbox` inicia também PostgreSQL e MiniStack pelo Compose. [Relatório da Fase 08](PHASE_8_REPORT.md)
+
+## Validação final
+
+- `test:all` compila e executa todos os arquivos `*.test.ts`, incluindo as suítes reais dependentes do Compose.
+- `test:resilience` executa os cenários de recuperação, reinício e resolução de referências fora de ordem.
+- `test:load` executa L1–L8 e auditoria exata de wagers, ledger, saldo, Inbox e Outbox. A carga é uma execução separada.
+- O teste de reinício troca API, consumer e publisher sobre o mesmo banco e as mesmas filas, retoma uma referência e reconcilia o saldo após o replay.
+
+[Relatório final](FINAL_TEST_REPORT.md) · [Carga](LOAD_TEST_REPORT.md) · [Reversões](REVERSAL_MATRIX.md)

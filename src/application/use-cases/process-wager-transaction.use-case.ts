@@ -82,8 +82,9 @@ export class ProcessWagerTransactionUseCase {
   async retryPendingReference(
     transactionId: string,
     policy: ReferenceRetryPolicy,
+    trace: EventTrace = {},
   ): Promise<ProcessWagerResult | undefined> {
-    return this.resume(transactionId, {}, policy);
+    return this.resume(transactionId, trace, policy);
   }
 
   private async resume(
@@ -214,7 +215,7 @@ export class ProcessWagerTransactionUseCase {
       await this.recordReceipt(
         repos.inbox,
         receipt,
-        proposed.payloadHash,
+        record.transaction,
         this.runtime.clock.now(),
         true,
       );
@@ -314,39 +315,45 @@ export class ProcessWagerTransactionUseCase {
       {
         ...trace,
         ...(trace.causationId === undefined && receipt ? { causationId: receipt.messageId } : {}),
+        ...(receipt ? { sourceMessageId: receipt.messageId } : {}),
       },
       this.runtime.ids,
     );
-    if (receipt) await this.recordReceipt(repos.inbox, receipt, transaction.payloadHash, at, false);
+    if (receipt) await this.recordReceipt(repos.inbox, receipt, transaction, at, false);
     return processResult({ transaction, ...details }, false);
   }
 
   private async recordReceipt(
     repository: InboxRepository,
     receipt: InboxReceipt | undefined,
-    hash: string,
+    transaction: WagerTransaction,
     at: Date,
     replaying: boolean,
   ): Promise<void> {
     if (!receipt) return;
+    const { id, payloadHash } = transaction;
     const previous = await repository.find(receipt.consumerName, receipt.messageId, {
       forUpdate: true,
     });
     if (previous) {
-      if (previous.payloadHash !== hash || (previous.isProcessed() && !replaying)) {
+      if (
+        previous.payloadHash !== payloadHash ||
+        (previous.transactionId !== undefined && previous.transactionId !== id) ||
+        (previous.isProcessed() && !replaying)
+      ) {
         throw new ApplicationError(
           "INBOX_CONFLICT",
           "The inbox receipt already records another operation",
         );
       }
       if (previous.isProcessed()) return;
-      previous.markProcessed(new Date(Math.max(at.getTime(), previous.receivedAt.getTime())));
+      previous.markProcessed(new Date(Math.max(at.getTime(), previous.receivedAt.getTime())), id);
       await repository.saveProcessed(previous);
       return;
     }
 
-    const message = InboxMessage.receive({ ...receipt, receivedAt: at, payloadHash: hash });
-    message.markProcessed(at);
+    const message = InboxMessage.receive({ ...receipt, receivedAt: at, payloadHash });
+    message.markProcessed(at, id);
     await repository.insert(message);
   }
 

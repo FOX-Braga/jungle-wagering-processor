@@ -14,6 +14,7 @@ import {
 } from "../../../application/use-cases/financial-queries";
 import { ProcessWagerTransactionUseCase } from "../../../application/use-cases/process-wager-transaction.use-case";
 import { WagerTransactionStatus as Status } from "../../../domain/wagering/wager-transaction";
+import { observeWager } from "../../../infrastructure/observability/wager-observation";
 import {
   idempotencyKey,
   idempotencyPattern,
@@ -112,12 +113,24 @@ export class WagerController {
     const context = getRequestContext(request);
     context.walletId = body.walletId;
     context.providerId = body.providerId;
-    const result = await this.process.execute({
-      ...body,
-      idempotencyKey: key.data,
-      correlationId: context.correlationId,
-    });
+    context.operation = body.kind;
+    const result = await observeWager(request.metrics, "http", () =>
+      this.process.execute({
+        ...body,
+        idempotencyKey: key.data,
+        correlationId: context.correlationId,
+      }),
+    );
     context.transactionId = result.transactionId;
+    context.outcome = result.status;
+    if (result.failureCode) context.errorCode = result.failureCode;
+    context.event = result.idempotentReplay
+      ? "wager.idempotency.replay"
+      : result.status === Status.PendingReference
+        ? "reference.pending"
+        : result.status === Status.Rejected
+          ? "wager.processing.rejected"
+          : "wager.processing.completed";
     if (result.status === Status.PendingReference) response.statusCode = 202;
     if (result.status === Status.Rejected) response.statusCode = 422;
     return result;

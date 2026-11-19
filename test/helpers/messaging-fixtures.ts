@@ -16,6 +16,7 @@ import { createTestDatabase, loadIntegrationConfig } from "./test-database";
 import { waitFor } from "./wait-for";
 
 interface WorkerLog {
+  observedAt: number;
   result?: string;
   messageId?: string;
   transactionId?: string;
@@ -51,7 +52,7 @@ async function startWorker(config: AppConfig, role: WorkerRole, point?: Failpoin
       for (const line of lines) {
         if (!line.trim()) continue;
         const log = JSON.parse(line) as WorkerLog & { message?: WorkerLog };
-        logs.push(log.message ?? log);
+        logs.push({ ...(log.message ?? log), observedAt: performance.now() });
       }
     }
   })();
@@ -207,9 +208,10 @@ export async function messagingFixture(
         group = command.walletId,
       ) {
         const data = { ...command };
-        const { correlationId } = data;
+        const { correlationId, causationId } = data;
         delete data.correlationId;
         delete data.causationId;
+        delete data.sourceMessageId;
         delete data.inbox;
         return this.sendRaw(
           JSON.stringify({
@@ -217,6 +219,7 @@ export async function messagingFixture(
             type: "WagerTransactionRequested",
             occurredAt: new Date().toISOString(),
             ...(correlationId ? { correlationId } : {}),
+            ...(causationId ? { causationId } : {}),
             data,
           }),
           group,

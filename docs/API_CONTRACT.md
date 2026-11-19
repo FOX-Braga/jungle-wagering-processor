@@ -88,7 +88,7 @@ As duas rotas de consulta retornam a visão persistida, com ID, provedor, ID ext
 
 ## Reconciliar saldo
 
-`POST /wallets/:walletId/reconciliation` sem corpo lê a carteira e a soma do ledger no mesmo snapshot SQL. O resultado aponta a diferença assinada `storedBalance − calculatedBalance`. Uma divergência retorna `consistent: false` com status `200`, mantém os registros e incrementa o contador `reconciliation_divergences_total` no log da instância.
+`POST /wallets/:walletId/reconciliation` sem corpo lê a carteira e a soma do ledger no mesmo snapshot SQL em uma transação somente leitura. O resultado aponta a diferença assinada `storedBalance − calculatedBalance`. Uma divergência retorna `consistent: false` com status `200`, registra `reconciliation.divergence` e incrementa `wager_reconciliation_total` com `result=divergent`.
 
 ```json
 {
@@ -105,16 +105,16 @@ As duas rotas de consulta retornam a visão persistida, com ID, provedor, ID ext
 
 Envie um `X-Correlation-Id` válido ou use o que a API gera. O ID aparece no cabeçalho de resposta, nos erros estruturados, nos logs e nos eventos produzidos pela operação. Um cabeçalho inválido retorna `400` com um novo ID para rastrear a resposta.
 
-| HTTP  | Códigos e resposta                                                                                                                        |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `400` | `INVALID_REQUEST`, `INVALID_COMMAND`, `INVALID_CURSOR`, `INVALID_IDEMPOTENCY_KEY`, `INVALID_CORRELATION_ID`                               |
-| `404` | `WALLET_NOT_FOUND`, `WAGER_NOT_FOUND`, `ROUTE_NOT_FOUND`                                                                                  |
-| `409` | `WALLET_ALREADY_EXISTS`, `IDEMPOTENCY_CONFLICT`, `EXTERNAL_TRANSACTION_CONFLICT`, `HISTORICAL_RESULT_UNAVAILABLE`                         |
-| `413` | `PAYLOAD_TOO_LARGE`                                                                                                                       |
-| `415` | `UNSUPPORTED_MEDIA_TYPE` para codificação ou charset incompatível                                                                         |
-| `422` | Transação `REJECTED` com `failureCode`, ou erro `WALLET_OWNERSHIP_MISMATCH`                                                               |
-| `500` | `INTERNAL_ERROR`                                                                                                                          |
-| `503` | `PERSISTENCE_UNAVAILABLE`, `LOCK_TIMEOUT`, `DEADLOCK`, `SERIALIZATION_FAILURE`, com `Retry-After: 1` para falhas financeiras transitórias |
+| HTTP  | Códigos e resposta                                                                                                                                       |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `400` | `INVALID_REQUEST`, `INVALID_COMMAND`, `INVALID_CURSOR`, `INVALID_IDEMPOTENCY_KEY`, `INVALID_CORRELATION_ID`                                              |
+| `404` | `WALLET_NOT_FOUND`, `WAGER_NOT_FOUND`, `ROUTE_NOT_FOUND`                                                                                                 |
+| `409` | `WALLET_ALREADY_EXISTS`, `IDEMPOTENCY_CONFLICT`, `EXTERNAL_TRANSACTION_CONFLICT`, `HISTORICAL_RESULT_UNAVAILABLE`                                        |
+| `413` | `PAYLOAD_TOO_LARGE`                                                                                                                                      |
+| `415` | `UNSUPPORTED_MEDIA_TYPE` para codificação ou charset incompatível                                                                                        |
+| `422` | Transação `REJECTED` com `failureCode`, ou erro `WALLET_OWNERSHIP_MISMATCH`                                                                              |
+| `500` | `INTERNAL_ERROR`                                                                                                                                         |
+| `503` | `PERSISTENCE_UNAVAILABLE`, `LOCK_TIMEOUT`, `DEADLOCK`, `SERIALIZATION_FAILURE`, `HTTP_OVERLOADED`. Reenvie com a mesma identidade após `Retry-After: 1`. |
 
 Códigos financeiros de rejeição incluem `INSUFFICIENT_FUNDS`, `REVERSAL_INSUFFICIENT_FUNDS`, `CURRENCY_MISMATCH`, `WALLET_MISMATCH`, `INVALID_REFERENCE`, `REFERENCE_NOT_FOUND`, `REFERENCE_TYPE_NOT_ALLOWED`, `AMOUNT_MISMATCH` e `ALREADY_REVERSED`. A rejeição gravada mantém o formato da operação com `status: "REJECTED"`. Erros de protocolo e infraestrutura usam o envelope abaixo.
 

@@ -137,6 +137,7 @@ export class InboxRow {
   payloadHash!: string;
   receivedAt!: Date;
   processedAt!: Date | null;
+  transactionId!: string | null;
 }
 
 const inbox = new EntitySchema<InboxRow>({
@@ -149,6 +150,7 @@ const inbox = new EntitySchema<InboxRow>({
     payloadHash: text,
     receivedAt: date,
     processedAt: { ...date, nullable: true },
+    transactionId: { ...text, nullable: true },
   },
 });
 

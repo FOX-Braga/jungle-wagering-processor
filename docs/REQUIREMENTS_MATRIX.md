@@ -94,6 +94,8 @@ Os comandos e cenários estão no [plano de testes](TEST_PLAN.md) e no [runbook]
 
 ## Falhas eliminatórias
 
+A Fase 7 amplia F05, A03 e O01 com probes limitados, reconciliação somente leitura, logging correlacionado e métricas operacionais. T01 mantém a regressão de concorrência distribuída e ganha cenários de indisponibilidade e auditoria. O CLI de auditoria, os grants separados e o formato JSON das métricas são decisões de engenharia. Dashboard e tracing permanecem diferenciais opcionais. [Evidência da Fase 7](PHASE_7_REPORT.md)
+
 | Falha                                                | Requisito     | Evidência prevista                                              |
 | ---------------------------------------------------- | ------------- | --------------------------------------------------------------- |
 | Dinheiro representado como `number`                  | D01           | Contratos e teste de precisão acima do intervalo inteiro seguro |
@@ -104,3 +106,14 @@ Os comandos e cenários estão no [plano de testes](TEST_PLAN.md) e no [runbook]
 | Publicação anterior ao commit                        | M02           | Injeção de falha antes do commit e inspeção da fila             |
 | Ausência de ledger auditável                         | D04, A03      | Histórico reconstruível e proteção de imutabilidade no banco    |
 | Substituição integral de PostgreSQL ou SQS por mocks | F02, F04, T01 | Integração com PostgreSQL e MiniStack reais em containers       |
+
+## Evidências da Fase 08
+
+| ID            | Evidência local                                                                                                   |
+| ------------- | ----------------------------------------------------------------------------------------------------------------- |
+| F04, M01      | Provisionamento repetido, envelope v1 compatível com o legado, confirmação após commit e redrive nativo para DLQ. |
+| I01, C01      | Três consumidores com PIDs distintos, 50 entregas equivalentes, disputa de saldo e conflito de ID lógico.         |
+| D04, A03, T01 | Crash após commit, reentrega por outro processo e inspeção de Inbox, wager, ledger, Outbox e reconciliação.       |
+| O01           | Logs e métricas do consumer, inspeção de filas, comando de demonstração e runbook.                                |
+
+[Diagnóstico](PHASE_8_DIAGNOSIS.md) · [Relatório e checklist](PHASE_8_REPORT.md)

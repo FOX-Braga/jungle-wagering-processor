@@ -9,7 +9,7 @@ import {
 type MigrationCommand = "up" | "down" | "status";
 
 export async function runMigrations(config: AppConfig, command: MigrationCommand): Promise<void> {
-  const orm = await MikroORM.init(createOrmOptions(config));
+  const orm = await MikroORM.init(createOrmOptions(config, 10_000));
   try {
     const migrator = orm.getMigrator();
 
