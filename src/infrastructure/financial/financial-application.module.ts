@@ -12,6 +12,7 @@ import {
   GetWalletUseCase,
 } from "../../application/use-cases/financial-queries";
 import { ProcessWagerTransactionUseCase } from "../../application/use-cases/process-wager-transaction.use-case";
+import { ReconcileWalletUseCase } from "../../application/use-cases/reconcile-wallet.use-case";
 import { PersistenceModule } from "../persistence/persistence.module";
 
 const runtime: FinancialRuntime = {
@@ -23,6 +24,7 @@ const queries = [
   GetWalletLedgerUseCase,
   GetWagerTransactionUseCase,
   GetProviderWagerTransactionUseCase,
+  ReconcileWalletUseCase,
 ];
 
 @Module({

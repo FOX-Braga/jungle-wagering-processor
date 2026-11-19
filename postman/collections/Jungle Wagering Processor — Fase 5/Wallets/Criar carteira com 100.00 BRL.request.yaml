@@ -1,0 +1,39 @@
+$kind: http-request
+url: "{{baseUrl}}/wallets"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "playerId": "{{playerId}}",
+      "initialBalance": {
+        "amount": "100.00",
+        "currency": "BRL"
+      }
+    }
+scripts:
+  - type: beforeRequest
+    code: |-
+      pm.environment.set("playerId", pm.variables.replaceIn("{{$guid}}"));
+      pm.environment.unset("walletId");
+      pm.environment.unset("transactionId");
+      pm.environment.unset("externalTransactionId");
+      pm.environment.unset("idempotencyKey");
+      pm.environment.unset("referenceExternalTransactionId");
+      pm.environment.unset("refundExternalTransactionId");
+      pm.environment.unset("refundTransactionId");
+      pm.environment.unset("temporaryExternalId");
+      pm.environment.unset("temporaryKey");
+      pm.environment.unset("nextCursor");
+    language: text/javascript
+  - type: afterResponse
+    code: |-
+      pm.test("HTTP 201", function () { pm.response.to.have.status(201); });
+      const wallet = pm.response.json();
+      pm.test("Saldo inicial", function () { pm.expect(wallet.balance.amount).to.eql("100.00"); });
+      pm.test("Versão inicial", function () { pm.expect(wallet.version).to.eql(1); });
+      if (pm.response.code === 201) pm.environment.set("walletId", wallet.id);
+    language: text/javascript
+order: 1000

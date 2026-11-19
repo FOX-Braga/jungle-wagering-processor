@@ -5,6 +5,8 @@ import {
   type ReadinessStatus,
 } from "../../infrastructure/observability/readiness.service";
 
+import { ApiProblems } from "./dto/openapi-schemas";
+
 const checks = {
   type: "object",
   required: ["postgres", "sqs"],
@@ -14,13 +16,26 @@ const checks = {
   },
 };
 
+export class ReadinessUnavailable extends HttpException {
+  constructor(public readonly readiness: ReadinessStatus) {
+    super(readiness, HttpStatus.SERVICE_UNAVAILABLE);
+  }
+}
+
 @ApiTags("Health")
+@ApiProblems(400, 500)
 @Controller("health")
 export class HealthController {
   constructor(@Inject(ReadinessService) private readonly readiness: ReadinessService) {}
 
   @Get("live")
-  @ApiOkResponse({ schema: { example: { status: "ok" } } })
+  @ApiOkResponse({
+    schema: {
+      type: "object",
+      required: ["status"],
+      properties: { status: { type: "string", enum: ["ok"] } },
+    },
+  })
   live(): { status: "ok" } {
     return { status: "ok" };
   }
@@ -43,7 +58,7 @@ export class HealthController {
   async ready(): Promise<ReadinessStatus> {
     const result = await this.readiness.check();
     if (result.status === "unavailable") {
-      throw new HttpException(result, HttpStatus.SERVICE_UNAVAILABLE);
+      throw new ReadinessUnavailable(result);
     }
     return result;
   }

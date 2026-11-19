@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/wallets/{{walletId}}/ledger?limit=2"
+method: GET
+queryParams:
+  limit: "2"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("HTTP 200", function () { pm.response.to.have.status(200); });
+      const page = pm.response.json();
+      pm.test("Versões 1 e 2", function () { pm.expect(page.items.map(function (entry) { return entry.walletVersion; })).to.eql([1,2]); });
+      pm.test("Há outra página", function () { pm.expect(page.hasMore).to.eql(true); });
+      if (page.nextCursor) pm.environment.set("nextCursor", page.nextCursor);
+    language: text/javascript
+order: 1000

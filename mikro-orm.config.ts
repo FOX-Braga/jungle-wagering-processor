@@ -2,10 +2,13 @@ import { Migrator } from "@mikro-orm/migrations";
 import { defineConfig } from "@mikro-orm/postgresql";
 import { join } from "node:path";
 import type { AppConfig } from "./src/infrastructure/config/environment";
+import { createLogger } from "./src/infrastructure/observability/logger";
 import { financialEntities } from "./src/infrastructure/persistence/entities/financial-entities";
 
 export function createOrmOptions(config: AppConfig) {
   const migrations = join(__dirname, "src", "infrastructure", "persistence", "migrations");
+
+  const logger = createLogger(config.LOG_LEVEL);
 
   return defineConfig({
     clientUrl: config.DATABASE_URL,
@@ -16,7 +19,20 @@ export function createOrmOptions(config: AppConfig) {
     debug:
       config.NODE_ENV === "development" && config.LOG_LEVEL === "debug" ? ["discovery"] : false,
     pool: { min: 0, max: 10, acquireTimeoutMillis: 2_500 },
-    driverOptions: { connection: { connectionTimeoutMillis: 1_500, query_timeout: 1_500 } },
+    driverOptions: {
+      connection: {
+        application_name: config.INSTANCE_ID ?? "jungle-wagering",
+        connectionTimeoutMillis: 1_500,
+        query_timeout: 1_500,
+      },
+      log: {
+        warn: () =>
+          logger.warn(
+            { code: "DATABASE_DRIVER_WARNING", instanceId: config.INSTANCE_ID },
+            "PostgreSQL",
+          ),
+      },
+    },
     extensions: [Migrator],
     migrations: {
       path: migrations,

@@ -1,0 +1,36 @@
+$kind: http-request
+url: "{{baseUrl}}/wagering/transactions"
+method: POST
+headers:
+  Content-Type: application/json
+  Idempotency-Key: "{{idempotencyKey}}"
+  X-Correlation-Id: postman-replay
+body:
+  type: json
+  content: |-
+    {
+      "providerId": "{{providerId}}",
+      "externalTransactionId": "{{externalTransactionId}}",
+      "playerId": "{{playerId}}",
+      "walletId": "{{walletId}}",
+      "roundId": "postman-round",
+      "gameId": "postman-demo",
+      "kind": "BET",
+      "money": {
+        "amount": "25.00",
+        "currency": "BRL"
+      }
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("HTTP 200", function () { pm.response.to.have.status(200); });
+      const result = pm.response.json();
+      pm.test("Operação processada", function () { pm.expect(result.status).to.eql("PROCESSED"); });
+      pm.test("Saldo histórico em centavos exatos", function () { pm.expect(result.balance.amount).to.eql("75.00"); });
+      pm.test("Versão da carteira", function () { pm.expect(result.walletVersion).to.eql(2); });
+      pm.test("Indicador de replay", function () { pm.expect(result.idempotentReplay).to.eql(true); });
+      pm.test("ID original preservado", function () { pm.expect(result.transactionId).to.eql(pm.environment.get("transactionId")); });
+      pm.test("Correlation ID devolvido", function () { pm.expect(pm.response.headers.get("X-Correlation-Id")).to.eql("postman-replay"); });
+    language: text/javascript
+order: 1000

@@ -193,4 +193,4 @@ O saldo materializado é reconciliável com créditos menos débitos. O ledger �
 
 ## Integrações das próximas fases
 
-A Fase 5 conecta os casos de uso à API REST, ao cabeçalho de idempotência, aos filtros de exceção e à documentação OpenAPI. A concorrência da Fase 4 usa múltiplas conexões e instâncias do caso de uso em um processo de teste. A próxima validação inclui processos independentes. A integração com o consumidor SQS, ack após commit, agendamento e prazo de referências e publicação da outbox serão tratados nas fases correspondentes.
+A Fase 5 conecta os casos de uso à API REST, ao cabeçalho de idempotência, aos filtros de exceção e à documentação OpenAPI. Os testes distribuídos exercitam três processos independentes sobre o mesmo PostgreSQL. A Fase 6 integra o consumidor SQS, o ack após commit, o agendamento e prazo de referências e a publicação da outbox. [Contrato HTTP](API_CONTRACT.md) · [Concorrência distribuída](DISTRIBUTED_CONCURRENCY.md)

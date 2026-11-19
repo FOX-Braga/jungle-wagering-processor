@@ -73,6 +73,16 @@ Os scripts carregam a configuração padrão de `.env.example`. Crie um `.env` l
 
 Ao trocar a porta publicada do PostgreSQL, ajuste `DATABASE_URL`. Ao trocar porta ou conta do MiniStack, ajuste o endpoint e as duas URLs de fila do host. As URLs internas usam os serviços DNS do Compose. Em DSNs com caracteres especiais, use _percent encoding_ e ajuste `DATABASE_URL_DOCKER` para o Compose, se necessário.
 
+## API financeira e Postman
+
+Com a API local em execução, abra `http://127.0.0.1:3000/docs` para o Swagger ou importe a coleção e selecione o ambiente local no Postman. A coleção abre uma carteira, demonstra o replay histórico, executa reversões e termina com reconciliação. [Contrato HTTP](docs/API_CONTRACT.md) · [Guia do Postman](docs/POSTMAN_GUIDE.md)
+
+```powershell
+bun run demo:http
+```
+
+O comando usa a API local na porta 3000. Se outro processo já ocupa a porta, defina `$env:PORT = "3005"` antes de iniciar a API e use `bun run demo:http http://127.0.0.1:3005`.
+
 ## PostgreSQL e migrations
 
 A migration inicial cria o schema `wagering`. As migrations financeiras criam tabelas, índices, constraints e triggers de integridade. A migration da Fase 4 acrescenta snapshots de referências pendentes e preserva a moeda original de comandos rejeitados por divergência. O histórico fica em `public.mikro_orm_migrations`. O comando de migration usa `DATABASE_URL`, incluindo o valor de `.env` quando configurado. Se você usa pgAdmin com `jungle_db`, abra **Schemas → wagering → Tables** e atualize a árvore depois do `up`.
@@ -113,6 +123,8 @@ Para rodar a integração completa, prepare os serviços descartáveis com os va
 docker compose --env-file .env.example up -d --wait postgres sqs
 bun --env-file=.env.example scripts/bootstrap/infra.ts provision
 bun run test:integration
+bun run test:e2e
+bun run test:distributed
 ```
 
 `provision` aplica as migrations e garante as filas de teste. `TEST_DATABASE_URL` identifica o PostgreSQL isolado na porta `5434`, e a conta deve ter permissão para criar bancos descartáveis. A suíte de persistência cria e limpa bancos com nomes gerados. Os testes de regressão usam PostgreSQL e MiniStack reais.
@@ -128,7 +140,7 @@ bun run test:concurrency
 bun run test:atomicity
 ```
 
-As três suítes da Fase 4 também fazem parte de `test:integration`. Elas executam os casos de uso contra PostgreSQL real, incluindo replay após reconexão, concorrência e falhas antes do commit. Os endpoints financeiros serão integrados na Fase 5. [Motor financeiro](docs/FINANCIAL_PROCESSING.md)
+As três suítes da Fase 4 também fazem parte de `test:integration`. Elas executam os casos de uso contra PostgreSQL real, incluindo replay após reconexão, concorrência e falhas antes do commit. Os testes E2E fazem requisições HTTP reais e os distribuídos compilam e iniciam três processos separados sobre o mesmo banco descartável. [Motor financeiro](docs/FINANCIAL_PROCESSING.md) · [Concorrência distribuída](docs/DISTRIBUTED_CONCURRENCY.md)
 
 ## Troubleshooting
 

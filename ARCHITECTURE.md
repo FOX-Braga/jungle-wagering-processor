@@ -24,7 +24,7 @@ A configuração é validada antes de iniciar o HTTP. O driver inicializa de for
 | Domain         | Entidades encapsuladas, agregados, objetos de valor, regras e eventos | Núcleo implementado e testado na Fase 2                |
 | Application    | Casos de uso, portas e escopo transacional                            | Motor financeiro, leituras e porta de identidade       |
 | Infrastructure | Configuração, persistência, mensageria, workers e observabilidade     | MikroORM, SQS, migrations, probes e logger estruturado |
-| Presentation   | Controllers, DTOs, filtros e API                                      | Health público e documentação OpenAPI                  |
+| Presentation   | Controllers, DTOs, filtros e API                                      | API financeira, health público e OpenAPI               |
 
 As dependências apontam para o domínio e os casos de uso. Controllers adaptam HTTP e chamam a aplicação. Repositórios e clientes externos implementam as portas necessárias. O composition root no NestJS resolve a injeção. Um worker poderá usar um contexto isolado do MikroORM por unidade de trabalho, assim como uma requisição usa seu próprio contexto.
 
@@ -42,7 +42,7 @@ As dependências apontam para o domínio e os casos de uso. Controllers adaptam 
 | Lock pessimista por wallet            | `SELECT … FOR UPDATE` serializa a movimentação da mesma carteira entre instâncias. Carteiras distintas avançam em paralelo. Uma carteira muito disputada tem fila de contenção. O chamador recebe falhas tipadas de contenção para decidir o retry. |
 | Idempotência persistida               | Chave única, hash SHA-256 de JSON canônico dos campos de negócio e unicidade de provedor/ID externo. O resultado histórico é persistido para replay. O custo é manter os índices e o snapshot da resposta.                                          |
 | Inbox e outbox transacionais          | Inbox, resultado, alterações de saldo, ledger e eventos partilham o commit. Ack vem depois do commit. A publicação exige um processo independente e pode repetir em caso de crash após envio.                                                       |
-| HTTP e SQS compartilham o caso de uso | Os adaptadores convertem seus contratos para o mesmo comando. O domínio decide a regra uma vez e o PostgreSQL protege contra duplicatas intercanal.                                                                                                 |
+| HTTP e SQS compartilham o caso de uso | O adaptador HTTP converte seu contrato para o comando que o consumidor SQS também usará. O domínio decide a regra uma vez e o PostgreSQL protege contra duplicatas intercanal.                                                                      |
 | Eventos at-least-once                 | O publicador terá reservas expiradas recuperáveis, backoff e `eventId` persistido. O consumidor pode deduplicar usando o ID estável.                                                                                                                |
 | Identidade externa                    | A fase deixa o contrato `ProviderIdentityPort`. Um futuro guard HTTP validará assinatura, emissor, público e expiração com um IdP OIDC, e vinculará a identidade autenticada ao provedor. Health é público.                                         |
 
@@ -54,7 +54,17 @@ Entidades ORM e mappers separados reidratam as cinco entidades de domínio. `Tra
 
 A abertura e as operações de aposta usam portas independentes de transporte. A aplicação canonicaliza o comando, resolve replay e conflitos, bloqueia a carteira e delega a decisão ao domínio. O adaptador PostgreSQL grava snapshot, movimento, outbox e inbox aplicável no mesmo commit. As consultas usam IDs internos, identidade do provedor e cursor de ledger. A documentação do motor descreve as sequências e a retomada de referências. [Motor financeiro](docs/FINANCIAL_PROCESSING.md)
 
-## Integração prevista com adaptadores HTTP e SQS
+## API REST da Fase 5
+
+Os controllers NestJS adaptam os contratos HTTP para os casos de uso. Um pipe global usa os schemas Zod dos DTOs com objetos estritos e coerção explícita do limite de paginação. O filtro central traduz erros tipados. POST de aposta devolve `200` para confirmada, `202` para pendente e `422` para rejeição persistida. Conflitos usam `409`. Falhas temporárias usam `503` para permitir reenvio com a chave original. [Contrato HTTP](docs/API_CONTRACT.md)
+
+O middleware associa o `X-Correlation-Id` ao HTTP e aos eventos, com logs JSON por rota e instância. CORS está desabilitado. A API de desenvolvimento escuta em loopback e serve Swagger. O Compose publica a API em loopback, mantém readiness sobre PostgreSQL e MiniStack e executa migrations no serviço de setup.
+
+A avaliação usa API sem autenticação para priorizar os requisitos financeiros. A opção requer uma rede de desenvolvimento ou avaliação isolada. `ProviderIdentityPort` é o ponto de extensão de um guard OIDC. O guard futuro valida assinatura, emissor, público, validade e vínculo do claim do provedor ao comando ou à rota. A autorização também deverá vincular o provedor às carteiras e transações permitidas. Health permanece público.
+
+O PostgreSQL coordena as três instâncias independentes por lock de carteira e restrições únicas. A reconciliação consulta saldo e ledger no mesmo snapshot SQL. O shutdown fecha o listener, drena requisições aceitas e fecha as dependências dentro do prazo configurado. [Concorrência distribuída](docs/DISTRIBUTED_CONCURRENCY.md)
+
+## Integração HTTP e processamento SQS previsto
 
 ```mermaid
 sequenceDiagram
@@ -84,5 +94,5 @@ O [modelo de domínio](docs/DOMAIN_MODEL.md) descreve as factories, os fluxos e 
 - `OPENING` é interno. Abertura positiva gera crédito e a versão inicial é 1. `LOSS` registra o resultado sem lançamento ou avanço de versão.
 - `WIN` aceita referência opcional a uma `BET` processada. `REFUND` e `ROLLBACK` exigem referência íntegra e valor integral. As referências devem corresponder a provedor, jogador, wallet, moeda e rodada.
 - A decisão inicial trata `REFUND` e `ROLLBACK` diretos da mesma `BET` como alternativas para evitar dois créditos. `ROLLBACK` da própria `REFUND` continua permitido. Trata-se de uma interpretação adicional à proteção mínima do enunciado por tipo.
-- Referência ausente fica pendente com backoff persistido. No fim do prazo, a rejeição usa `REFERENCE_NOT_FOUND`. O prazo será dimensionado junto dos testes de reprocessamento.
+- Referência ausente fica pendente com snapshot persistido. Backoff, prazo e rejeição por `REFERENCE_NOT_FOUND` são responsabilidades do worker da Fase 6.
 - Códigos de negócio definidos incluem `INSUFFICIENT_FUNDS`, `REVERSAL_INSUFFICIENT_FUNDS`, `INVALID_REFERENCE`, `AMOUNT_MISMATCH`, `CURRENCY_MISMATCH` e `ALREADY_REVERSED`. Idempotência divergente é conflito. Falha transitória de dependência é indisponibilidade.

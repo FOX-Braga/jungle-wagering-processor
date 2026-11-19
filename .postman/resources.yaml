@@ -2,6 +2,10 @@
 workspace:
   id: e0906417-fb3b-4fcb-83db-c75c0271cf97
 
+cloudResources:
+  collections:
+    ../postman/collections/Jungle Wagering Processor — Fase 5: 41d9294f-1fb3-4789-ab24-4a68623b132b
+
 # All resources in the `postman/` folder are automatically registered in Local View.
 # Point to additional files outside the `postman/` folder to register them individually. Example:
 #localResources:

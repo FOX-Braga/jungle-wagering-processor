@@ -1,0 +1,11 @@
+$kind: http-request
+url: "{{baseUrl}}/wallets/{{walletId}}"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("HTTP 200", function () { pm.response.to.have.status(200); });
+      pm.test("Saldo da carteira", function () { pm.expect(pm.response.json().balance.amount).to.eql("100.00"); });
+      pm.test("ID da carteira", function () { pm.expect(pm.response.json().id).to.eql(pm.environment.get("walletId")); });
+    language: text/javascript
+order: 2000

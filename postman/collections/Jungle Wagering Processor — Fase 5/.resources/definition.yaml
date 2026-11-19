@@ -1,0 +1,2 @@
+$kind: collection
+description: Execute a coleção de cima para baixo com o ambiente Jungle Local. A abertura cria um jogador novo e os requests seguintes reaproveitam os IDs capturados.

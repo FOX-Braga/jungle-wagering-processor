@@ -1,0 +1,11 @@
+$kind: http-request
+url: "{{baseUrl}}/wagering/transactions/{{transactionId}}"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("HTTP 200", function () { pm.response.to.have.status(200); });
+      pm.test("Tipo da transação", function () { pm.expect(pm.response.json().kind).to.eql("BET"); });
+      pm.test("Snapshot persistido", function () { pm.expect(pm.response.json().balance.amount).to.eql("75.00"); });
+    language: text/javascript
+order: 4000

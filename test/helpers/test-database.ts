@@ -56,7 +56,7 @@ export async function createTestDatabase(migrate = true) {
     created = true;
     orm = await MikroORM.init(testOptions);
     if (migrate) await orm.getMigrator().up();
-    return { orm, close, testOptions, name };
+    return { orm, close, testOptions, name, url };
   } catch (error) {
     await close();
     throw error;

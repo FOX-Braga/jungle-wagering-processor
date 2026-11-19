@@ -30,11 +30,18 @@ A suíte da Fase 2 executa os quatro cenários financeiros do roteiro, a matriz 
 - `test:atomicity` injeta falhas ao redor das gravações e provoca uma colisão de chave primária da outbox. Compara as cinco tabelas e confirma que o comando pode ser reapresentado.
 - `test:unit` cobre validação, hash canônico, mapeamento de erros e resposta histórica em isolamento. `test:integration` inclui as três suítes PostgreSQL da fase.
 
+## Etapa 05 — API HTTP e concorrência distribuída
+
+- `test:e2e` verifica contratos, validação, carteira, operações, reconciliação, histórico, OpenAPI, indisponibilidade e shutdown com PostgreSQL real.
+- `test:distributed` compila a API, inicia três processos e prova idempotência, locking, efeitos persistidos, recuperação e reconciliação sobre um banco compartilhado.
+- `test:http-contract` seleciona o cenário que compara schemas OpenAPI com entradas e respostas reais.
+- Os testes de integração das fases anteriores continuam disponíveis em `test:integration`.
+
 ## Verificações nas próximas etapas
 
 | Área                    | Evidência                                                                                                                                                                                                |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Concorrência            | Usar três ou mais processos reais com barreiras. Disputar duas BET de 80.00 sobre 100.00, repetir 50 requisições idênticas, demonstrar paralelismo entre carteiras e disputar reversões e publicadores.  |
+| Concorrência            | Estender as provas HTTP de três processos para consumidores e publicadores concorrentes de SQS.                                                                                                          |
 | Idempotência HTTP e SQS | Repetir o comando nos dois transportes e após reinício. Validar saldo histórico e conflito com hash divergente.                                                                                          |
 | Referências             | Exercitar entrega pelo SQS, retomada via agendamento e rejeição por prazo com emissão dos eventos.                                                                                                       |
 | Recuperação             | Injetar falha antes do commit, depois do commit antes do ack e depois da publicação antes da marcação. Parar e recuperar PostgreSQL e SQS. Confirmar ausência de efeito duplicado e entrega recuperável. |

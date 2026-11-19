@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/wallets/{{walletId}}/reconciliation"
+method: POST
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("HTTP 200", function () { pm.response.to.have.status(200); });
+      const audit = pm.response.json();
+      pm.test("Saldo atual", function () { pm.expect(audit.storedBalance.amount).to.eql("125.00"); });
+      pm.test("Saldo reconstruído", function () { pm.expect(audit.calculatedBalance.amount).to.eql("125.00"); });
+      pm.test("Saldo consistente", function () { pm.expect(audit.consistent).to.eql(true); });
+      pm.test("Cinco lançamentos", function () { pm.expect(audit.checkedEntries).to.eql(5); });
+    language: text/javascript
+order: 1000

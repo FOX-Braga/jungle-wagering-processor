@@ -1,28 +1,30 @@
-import "reflect-metadata";
-import { NestFactory } from "@nestjs/core";
-import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
-import { AppModule } from "./app.module";
+import { randomUUID } from "node:crypto";
 import { ConfigurationError, loadEnvironment } from "./infrastructure/config/environment";
 import { createLogger } from "./infrastructure/observability/logger";
+import { drainHttpApplication } from "./presentation/http/shutdown";
+import { createHttpApplication } from "./presentation/http/http-application";
 
 async function bootstrap(): Promise<void> {
-  const config = loadEnvironment();
+  const environment = loadEnvironment();
+  const config = { ...environment, INSTANCE_ID: environment.INSTANCE_ID ?? randomUUID() };
   const logger = createLogger(config.LOG_LEVEL);
-  const app = await NestFactory.create(AppModule.register(config), {
-    logger,
-    abortOnError: false,
-  });
-  app.enableShutdownHooks();
+  const app = await createHttpApplication(config);
+  const host = config.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1";
+  await app.listen(config.PORT, host);
+  logger.log({ port: config.PORT, instanceId: config.INSTANCE_ID, pid: process.pid }, "Bootstrap");
 
-  const openApi = new DocumentBuilder()
-    .setTitle("Jungle Wagering Processor")
-    .setDescription("Health checks da fundação do processador.")
-    .setVersion("0.1.0")
-    .build();
-  SwaggerModule.setup("docs", app, () => SwaggerModule.createDocument(app, openApi));
+  function stop(signal: NodeJS.Signals): void {
+    process.off("SIGINT", stop);
+    process.off("SIGTERM", stop);
+    logger.log({ signal, instanceId: config.INSTANCE_ID }, "Shutdown");
+    void drainHttpApplication(app, config.SHUTDOWN_TIMEOUT_MS).catch(() => {
+      logger.error({ code: "SHUTDOWN_FAILED", instanceId: config.INSTANCE_ID }, "Shutdown");
+      process.exit(1);
+    });
+  }
 
-  await app.listen(config.PORT, "0.0.0.0");
-  logger.log(`API escutando na porta ${config.PORT}`, "Bootstrap");
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
 }
 
 void bootstrap().catch((error: unknown) => {

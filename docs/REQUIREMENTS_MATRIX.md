@@ -68,6 +68,17 @@ A referência é o [README original do desafio](challenge/README.original.md). A
 | M01–M03 | Inbox e outbox financeiras verificadas       | Recibo e eventos no mesmo commit, replay sem duplicação de eventos e rollback após colisão SQL da outbox. Entrega e publicação ficam para as fases de mensageria. |
 | T01     | Casos de uso exercitados com PostgreSQL real | Integração, injeção de falhas, concorrência e sequências geradas com auditoria de saldo após cada comando.                                                        |
 
+## Situação ao fim da Fase 5
+
+| ID      | Status atual                             | Evidência e escopo                                                                                                                           |
+| ------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| F05–F06 | Health e porta de identidade             | Liveness público e readiness de PostgreSQL/SQS preservados. Decisão de avaliação sem autenticação e desenho OIDC documentados.               |
+| A01–A02 | REST verificada                          | Carteiras, ledger paginado, submissão e consulta de transações por ID ou provedor. DTOs estritos, erros e schemas OpenAPI conferidos em E2E. |
+| A03     | Reconciliação HTTP verificada            | Um snapshot para ledger e saldo, divergência controlada sinalizada e nenhum ajuste automático.                                               |
+| I01     | Idempotência HTTP verificada             | Cabeçalho obrigatório, colisões tipadas, replay histórico interprocesso e recuperação de resposta perdida após commit.                       |
+| C01     | Concorrência HTTP distribuída verificada | Três processos, disputas de saldo e reversão, 50 requisições iguais, progresso paralelo entre carteiras e restart em voo.                    |
+| T01     | Testes HTTP reais verificados            | Suítes E2E e distribuídas com PostgreSQL e MiniStack, mais a regressão das fases anteriores.                                                 |
+
 ## Falhas eliminatórias
 
 | Falha                                                | Requisito     | Evidência prevista                                              |

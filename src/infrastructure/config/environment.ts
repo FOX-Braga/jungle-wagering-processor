@@ -24,6 +24,16 @@ const schema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]),
     PORT: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(65535)),
+    SHUTDOWN_TIMEOUT_MS: z
+      .string()
+      .regex(/^\d+$/)
+      .transform(Number)
+      .pipe(z.number().int().min(100).max(60_000))
+      .default(10_000),
+    INSTANCE_ID: z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/)
+      .optional(),
     DATABASE_URL: databaseUrl,
     AWS_REGION: z.string().regex(/^[a-z]{2}(?:-[a-z0-9]+)+-\d+$/),
     AWS_ACCESS_KEY_ID: z.string().regex(/^\d{12}$/),

@@ -1,0 +1,28 @@
+name: Jungle Local — Fase 5
+values:
+  - key: baseUrl
+    value: 'http://127.0.0.1:3000'
+  - key: providerId
+    value: provider-a
+  - key: playerId
+    value: ''
+  - key: externalTransactionId
+    value: ''
+  - key: idempotencyKey
+    value: ''
+  - key: refundExternalTransactionId
+    value: ''
+  - key: temporaryExternalId
+    value: ''
+  - key: temporaryKey
+    value: ''
+  - key: walletId
+    value: ''
+  - key: transactionId
+    value: ''
+  - key: referenceExternalTransactionId
+    value: ''
+  - key: refundTransactionId
+    value: ''
+  - key: nextCursor
+    value: ''

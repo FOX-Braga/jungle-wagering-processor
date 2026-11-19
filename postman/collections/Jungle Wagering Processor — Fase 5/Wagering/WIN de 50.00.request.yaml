@@ -1,0 +1,40 @@
+$kind: http-request
+url: "{{baseUrl}}/wagering/transactions"
+method: POST
+headers:
+  Content-Type: application/json
+  Idempotency-Key: "{{temporaryKey}}"
+body:
+  type: json
+  content: |-
+    {
+      "providerId": "{{providerId}}",
+      "externalTransactionId": "{{temporaryExternalId}}",
+      "playerId": "{{playerId}}",
+      "walletId": "{{walletId}}",
+      "roundId": "postman-round",
+      "gameId": "postman-demo",
+      "kind": "WIN",
+      "money": {
+        "amount": "50.00",
+        "currency": "BRL"
+      },
+      "referenceExternalTransactionId": "{{referenceExternalTransactionId}}"
+    }
+scripts:
+  - type: beforeRequest
+    code: |-
+      const externalId = pm.variables.replaceIn("{{$guid}}");
+      pm.environment.set("temporaryExternalId", externalId);
+      pm.environment.set("temporaryKey", pm.environment.get("providerId") + ":" + externalId);
+    language: text/javascript
+  - type: afterResponse
+    code: |-
+      pm.test("HTTP 200", function () { pm.response.to.have.status(200); });
+      const result = pm.response.json();
+      pm.test("Operação processada", function () { pm.expect(result.status).to.eql("PROCESSED"); });
+      pm.test("Saldo histórico em centavos exatos", function () { pm.expect(result.balance.amount).to.eql("125.00"); });
+      pm.test("Versão da carteira", function () { pm.expect(result.walletVersion).to.eql(3); });
+      pm.test("Indicador de replay", function () { pm.expect(result.idempotentReplay).to.eql(false); });
+    language: text/javascript
+order: 2000

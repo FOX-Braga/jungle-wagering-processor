@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/providers/{{providerId}}/wagering/transactions/{{externalTransactionId}}"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("HTTP 200", function () { pm.response.to.have.status(200); });
+      pm.test("Mesmo ID interno", function () { pm.expect(pm.response.json().transactionId).to.eql(pm.environment.get("transactionId")); });
+    language: text/javascript
+order: 5000

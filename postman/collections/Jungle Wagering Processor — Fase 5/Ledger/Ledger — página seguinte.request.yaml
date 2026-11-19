@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/wallets/{{walletId}}/ledger?cursor={{nextCursor}}"
+method: GET
+queryParams:
+  cursor: "{{nextCursor}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("HTTP 200", function () { pm.response.to.have.status(200); });
+      const page = pm.response.json();
+      pm.test("Versões 3 a 5", function () { pm.expect(page.items.map(function (entry) { return entry.walletVersion; })).to.eql([3,4,5]); });
+      pm.test("Fim do ledger", function () { pm.expect(page.nextCursor).to.eql(null); });
+    language: text/javascript
+order: 2000

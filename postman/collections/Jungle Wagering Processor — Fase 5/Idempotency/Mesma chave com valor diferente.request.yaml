@@ -1,0 +1,29 @@
+$kind: http-request
+url: "{{baseUrl}}/wagering/transactions"
+method: POST
+headers:
+  Content-Type: application/json
+  Idempotency-Key: "{{idempotencyKey}}"
+body:
+  type: json
+  content: |-
+    {
+      "providerId": "{{providerId}}",
+      "externalTransactionId": "{{externalTransactionId}}",
+      "playerId": "{{playerId}}",
+      "walletId": "{{walletId}}",
+      "roundId": "postman-round",
+      "gameId": "postman-demo",
+      "kind": "BET",
+      "money": {
+        "amount": "30.00",
+        "currency": "BRL"
+      }
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("HTTP 409", function () { pm.response.to.have.status(409); });
+      pm.test("Conflito de chave", function () { pm.expect(pm.response.json().error.code).to.eql("IDEMPOTENCY_CONFLICT"); });
+    language: text/javascript
+order: 2000

@@ -1,3 +1,4 @@
+import { DriverException } from "@mikro-orm/core";
 import {
   PersistenceConflictError,
   PersistenceUnavailableError,
@@ -40,6 +41,26 @@ const unavailable = new Set([
 ]);
 
 export function normalizePersistenceError(error: unknown): unknown {
+  if (
+    error instanceof DriverException &&
+    (error.message === "Transaction query already complete, run with DEBUG=knex:tx for more info" ||
+      // MikroORM prefixes uncoded pg query timeouts with the SQL statement.
+      error.message.endsWith(" - Query read timeout"))
+  ) {
+    return new PersistenceUnavailableError(error);
+  }
+  if (
+    error instanceof Error &&
+    (error.name === "KnexTimeoutError" ||
+      [
+        "Connection terminated unexpectedly",
+        "Connection terminated",
+        "Connection ended unexpectedly",
+        "Query read timeout",
+      ].includes(error.message))
+  ) {
+    return new PersistenceUnavailableError(error);
+  }
   if (typeof error !== "object" || !error || !("code" in error) || typeof error.code !== "string")
     return error;
   switch (error.code) {
