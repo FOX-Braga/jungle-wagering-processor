@@ -21,10 +21,19 @@ export interface WagerResult {
 export interface WagerPersistenceDetails {
   readonly updatedAt: Date;
   readonly result?: WagerResult;
+  readonly referenceAttempts?: number;
 }
 
 export interface PersistedWager extends WagerPersistenceDetails {
   readonly transaction: WagerTransaction;
+  readonly referenceNextAttemptAt?: Date;
+}
+
+export interface PendingReferenceCandidate {
+  readonly id: string;
+  readonly walletId: string;
+  readonly providerId: string;
+  readonly referenceAttempts: number;
 }
 
 export interface WagerTransactionRepository {
@@ -40,6 +49,8 @@ export interface WagerTransactionRepository {
     limit: number,
   ): Promise<PersistedWager[]>;
   findAppliedReversals(referenceId: string): Promise<WagerTransaction[]>;
+  findDueReferences(now: Date, limit: number): Promise<PendingReferenceCandidate[]>;
+  scheduleReferenceRetry(id: string, attempts: number, dueAt: Date): Promise<void>;
   insert(transaction: WagerTransaction, details?: WagerPersistenceDetails): Promise<void>;
   saveState(transaction: WagerTransaction, details: WagerPersistenceDetails): Promise<void>;
 }

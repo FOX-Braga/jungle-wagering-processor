@@ -13,6 +13,7 @@ export interface OutboxMessageState {
   readonly attempts: number;
   readonly nextAttemptAt?: Date;
   readonly publishedAt?: Date;
+  readonly parkedAt?: Date;
 }
 
 interface RetryPolicy {
@@ -28,6 +29,7 @@ export class OutboxMessage {
   #attempts: number;
   #nextAttemptAt: number | undefined;
   #publishedAt: number | undefined;
+  #parkedAt: number | undefined;
 
   private constructor(
     public readonly id: string,
@@ -40,6 +42,7 @@ export class OutboxMessage {
     this.#attempts = state.attempts;
     this.#nextAttemptAt = state.nextAttemptAt?.getTime();
     this.#publishedAt = state.publishedAt?.getTime();
+    this.#parkedAt = state.parkedAt?.getTime();
     Object.freeze(this);
   }
 
@@ -73,8 +76,12 @@ export class OutboxMessage {
     return this.#publishedAt === undefined ? undefined : new Date(this.#publishedAt);
   }
 
+  get parkedAt(): Date | undefined {
+    return this.#parkedAt === undefined ? undefined : new Date(this.#parkedAt);
+  }
+
   isPending(): boolean {
-    return this.#publishedAt === undefined;
+    return this.#publishedAt === undefined && this.#parkedAt === undefined;
   }
 
   isDue(now: Date): boolean {
@@ -87,7 +94,7 @@ export class OutboxMessage {
     this.#nextAttemptAt = undefined;
   }
 
-  scheduleRetry(now: Date, policy: RetryPolicy = retryDefaults): void {
+  scheduleRetry(now: Date, policy: RetryPolicy = retryDefaults, maxAttempts = Infinity): void {
     this.assertPending();
     const startedAt = timestamp(now, FailureCode.InvalidMessage, this.readyAt());
     const { baseDelayMs, maxDelayMs } = policy;
@@ -107,7 +114,8 @@ export class OutboxMessage {
     const delay = Math.min(maxDelayMs, baseDelayMs * 2 ** this.#attempts);
     const scheduledAt = timestamp(new Date(startedAt + delay), FailureCode.InvalidMessage);
     this.#attempts = attempts;
-    this.#nextAttemptAt = scheduledAt;
+    this.#parkedAt = attempts >= maxAttempts ? startedAt : undefined;
+    this.#nextAttemptAt = this.#parkedAt === undefined ? scheduledAt : undefined;
   }
 
   private readyAt(): number {
@@ -118,7 +126,7 @@ export class OutboxMessage {
     if (!this.isPending()) {
       throw new DomainUsageError(
         FailureCode.InvalidMessageState,
-        "Outbox message is already published",
+        "Outbox message is already published or parked",
       );
     }
   }

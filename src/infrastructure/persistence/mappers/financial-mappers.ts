@@ -122,6 +122,8 @@ export function toWager(row: WagerRow): PersistedWager {
   return {
     transaction,
     updatedAt: row.updatedAt,
+    referenceAttempts: row.referenceAttempts ?? 0,
+    ...(row.referenceNextAttemptAt ? { referenceNextAttemptAt: row.referenceNextAttemptAt } : {}),
     ...(row.resultBalance !== null && row.resultWalletVersion !== null
       ? {
           result: {
@@ -187,6 +189,7 @@ export function outboxDelivery(message: OutboxMessage) {
     attempts: message.attempts,
     nextAttemptAt: message.nextAttemptAt ?? null,
     publishedAt: message.publishedAt ?? null,
+    parkedAt: message.parkedAt ?? null,
     claimOwner: null,
     claimUntil: null,
   };
@@ -213,5 +216,6 @@ export function toOutbox(row: OutboxRow): OutboxMessage {
     attempts: row.attempts,
     ...(row.nextAttemptAt ? { nextAttemptAt: row.nextAttemptAt } : {}),
     ...(row.publishedAt ? { publishedAt: row.publishedAt } : {}),
+    ...(row.parkedAt ? { parkedAt: row.parkedAt } : {}),
   });
 }

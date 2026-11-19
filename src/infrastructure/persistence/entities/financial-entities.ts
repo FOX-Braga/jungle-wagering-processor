@@ -62,6 +62,8 @@ export class WagerRow {
   processedAt!: Date | null;
   resultBalance!: string | null;
   resultWalletVersion!: number | null;
+  referenceAttempts?: number;
+  referenceNextAttemptAt?: Date | null;
   createdAt!: Date;
   updatedAt!: Date;
 }
@@ -91,6 +93,8 @@ const wager = new EntitySchema<WagerRow>({
     processedAt: { ...date, nullable: true },
     resultBalance: { ...money, nullable: true },
     resultWalletVersion: { ...version, nullable: true },
+    referenceAttempts: { ...version, default: 0 },
+    referenceNextAttemptAt: { ...date, nullable: true },
     createdAt: date,
     updatedAt: date,
   },
@@ -157,6 +161,7 @@ export class OutboxRow {
   attempts!: number;
   nextAttemptAt!: Date | null;
   publishedAt!: Date | null;
+  parkedAt!: Date | null;
   claimOwner!: string | null;
   claimUntil!: Date | null;
 }
@@ -174,6 +179,7 @@ const outbox = new EntitySchema<OutboxRow>({
     attempts: version,
     nextAttemptAt: { ...date, nullable: true },
     publishedAt: { ...date, nullable: true },
+    parkedAt: { ...date, nullable: true },
     claimOwner: { ...text, nullable: true },
     claimUntil: { ...date, nullable: true },
   },

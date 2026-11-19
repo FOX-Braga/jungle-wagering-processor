@@ -1,4 +1,5 @@
 import { InboxMessage } from "../../domain/messaging/inbox-message";
+import { FailureCode } from "../../domain/shared/failure-code";
 import type { Wallet } from "../../domain/wallet/wallet";
 import {
   WagerTransaction,
@@ -29,6 +30,12 @@ import {
 } from "../services/financial-input";
 
 const retryableUniqueResources = ["wager-idempotency", "wager-external", "inbox-message"] as const;
+
+interface ReferenceRetryPolicy {
+  readonly maxAttempts: number;
+  readonly baseDelayMs: number;
+  readonly maxDelayMs: number;
+}
 
 export class ProcessWagerTransactionUseCase {
   constructor(
@@ -67,22 +74,48 @@ export class ProcessWagerTransactionUseCase {
   }
 
   async resumePending(transactionId: string, trace: EventTrace = {}): Promise<ProcessWagerResult> {
+    const result = await this.resume(transactionId, trace);
+    if (!result) throw new Error("Manual resume returned no result");
+    return result;
+  }
+
+  async retryPendingReference(
+    transactionId: string,
+    policy: ReferenceRetryPolicy,
+  ): Promise<ProcessWagerResult | undefined> {
+    return this.resume(transactionId, {}, policy);
+  }
+
+  private async resume(
+    transactionId: string,
+    trace: EventTrace,
+    policy?: ReferenceRetryPolicy,
+  ): Promise<ProcessWagerResult | undefined> {
     identifier(transactionId, "transactionId");
     traceIdentifiers(trace);
     return this.transactions.execute(async (repos) => {
       const initial = await this.requireRecord(repos, transactionId);
-      if (initial.transaction.isTerminal()) return processResult(initial, true);
+      if (initial.transaction.isTerminal())
+        return policy ? undefined : processResult(initial, true);
       if (initial.transaction.status !== Status.PendingReference) {
         throw new ApplicationError("WAGER_NOT_PENDING", "Wager is not waiting for a reference");
       }
 
       const wallet = await this.lockWallet(repos, initial.transaction);
       const current = await this.requireRecord(repos, transactionId);
-      if (current.transaction.isTerminal()) return processResult(current, true);
+      if (current.transaction.isTerminal())
+        return policy ? undefined : processResult(current, true);
       if (current.transaction.status !== Status.PendingReference) {
         throw new ApplicationError("WAGER_NOT_PENDING", "Wager is not waiting for a reference");
       }
-      return this.apply(repos, current.transaction, wallet, trace, undefined, current);
+      if (
+        policy &&
+        current.referenceNextAttemptAt &&
+        current.referenceNextAttemptAt > this.runtime.clock.now()
+      ) {
+        return undefined;
+      }
+      return this.apply(repos, current.transaction, wallet, trace, undefined, current, policy);
     });
   }
 
@@ -219,6 +252,7 @@ export class ProcessWagerTransactionUseCase {
     trace: EventTrace,
     receipt?: InboxReceipt,
     existing?: PersistedWager,
+    policy?: ReferenceRetryPolicy,
   ): Promise<ProcessWagerResult> {
     const referenceId = transaction.referenceExternalTransactionId;
     const reference =
@@ -243,10 +277,31 @@ export class ProcessWagerTransactionUseCase {
       appliedReversals: reversals,
       ...(reference ? { reference } : {}),
     });
-    if (existing && outcome.status === Status.PendingReference)
-      return processResult(existing, true);
+    let referenceAttempts: number | undefined;
+    if (existing && outcome.status === Status.PendingReference) {
+      if (!policy) return processResult(existing, true);
+      const attempts = (existing.referenceAttempts ?? 0) + 1;
+      if (attempts < policy.maxAttempts) {
+        const delay = Math.min(policy.maxDelayMs, policy.baseDelayMs * 2 ** (attempts - 1));
+        await repos.wagers.scheduleReferenceRetry(
+          transaction.id,
+          attempts,
+          new Date(at.getTime() + delay),
+        );
+        return processResult(
+          { ...existing, result: existing.result ?? walletSnapshot(wallet) },
+          true,
+        );
+      }
+      transaction.reject(FailureCode.ReferenceNotFound);
+      referenceAttempts = attempts;
+    }
 
-    const details = { updatedAt: at, result: walletSnapshot(wallet) };
+    const details = {
+      updatedAt: at,
+      result: walletSnapshot(wallet),
+      ...(referenceAttempts === undefined ? {} : { referenceAttempts }),
+    };
     if (existing) await repos.wagers.saveState(transaction, details);
     else await repos.wagers.insert(transaction, details);
     const entry = outcome.status === Status.Processed ? outcome.ledgerEntry : undefined;

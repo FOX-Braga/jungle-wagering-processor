@@ -40,24 +40,26 @@ const unavailable = new Set([
   "57014",
 ]);
 
+const connectionFailures = [
+  "Connection terminated unexpectedly",
+  "Connection terminated",
+  "Connection ended unexpectedly",
+  "Client has encountered a connection error and is not queryable",
+  "Client was closed and is not queryable",
+  "Query read timeout",
+];
+
 export function normalizePersistenceError(error: unknown): unknown {
-  if (
-    error instanceof DriverException &&
-    (error.message === "Transaction query already complete, run with DEBUG=knex:tx for more info" ||
-      // MikroORM prefixes uncoded pg query timeouts with the SQL statement.
-      error.message.endsWith(" - Query read timeout"))
-  ) {
-    return new PersistenceUnavailableError(error);
-  }
   if (
     error instanceof Error &&
     (error.name === "KnexTimeoutError" ||
-      [
-        "Connection terminated unexpectedly",
-        "Connection terminated",
-        "Connection ended unexpectedly",
-        "Query read timeout",
-      ].includes(error.message))
+      (error instanceof DriverException &&
+        error.message ===
+          "Transaction query already complete, run with DEBUG=knex:tx for more info") ||
+      // Knex and MikroORM can prefix uncoded pg errors with the SQL statement.
+      connectionFailures.some(
+        (message) => error.message === message || error.message.endsWith(` - ${message}`),
+      ))
   ) {
     return new PersistenceUnavailableError(error);
   }

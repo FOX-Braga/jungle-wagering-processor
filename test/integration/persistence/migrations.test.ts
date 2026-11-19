@@ -46,6 +46,7 @@ test("up, down and reapply recreate tables, columns, constraints, indexes and tr
     "Migration20261118000100",
     "Migration20261118000200",
     "Migration20261118000300",
+    "Migration20261118000400",
   ]);
 
   const first = await snapshot();
@@ -79,7 +80,7 @@ test("up, down and reapply recreate tables, columns, constraints, indexes and tr
     .execute<{ exists: boolean }[]>("select to_regnamespace('wagering') is not null as exists");
   expect(row?.exists).toBe(false);
   expect(await migrator.getExecutedMigrations()).toEqual([]);
-  expect(await migrator.up()).toHaveLength(4);
+  expect(await migrator.up()).toHaveLength(5);
   expect(await snapshot()).toEqual(first);
   expect(await migrator.up()).toEqual([]);
   expect(await migrator.getPendingMigrations()).toEqual([]);

@@ -79,6 +79,19 @@ A referência é o [README original do desafio](challenge/README.original.md). A
 | C01     | Concorrência HTTP distribuída verificada | Três processos, disputas de saldo e reversão, 50 requisições iguais, progresso paralelo entre carteiras e restart em voo.                    |
 | T01     | Testes HTTP reais verificados            | Suítes E2E e distribuídas com PostgreSQL e MiniStack, mais a regressão das fases anteriores.                                                 |
 
+## Situação ao fim da Fase 6
+
+| ID       | Evidência                                                                                                                                                     |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F04, M01 | Filas FIFO com redrive, fila standard de eventos, ACK após commit, Inbox persistente e DLQ verificados com MiniStack.                                         |
+| I01, C01 | Três consumers em paralelo, 50 entregas equivalentes e concorrência HTTP/SQS. Saldo e ledger verificados por reconciliação.                                   |
+| M02, M03 | Eventos confirmados junto com o comando, dois publishers com claims distintos e recuperação após falha de destino, crash antes do envio e crash após o envio. |
+| D06      | REFUND e ROLLBACK fora de ordem, reprocessamento concorrente, backoff persistido, rejeição por expiração e recuperação após crash.                            |
+| O01      | Logs JSON, atributos de filas e consultas operacionais de backlog e pendências. Exportação de métricas e alertas ficam para a Fase 7.                         |
+| T01      | Testes exercitam processos reais, redelivery, perda de conexão e invariantes no PostgreSQL.                                                                   |
+
+Os comandos e cenários estão no [plano de testes](TEST_PLAN.md) e no [runbook](FAILURE_SCENARIOS.md).
+
 ## Falhas eliminatórias
 
 | Falha                                                | Requisito     | Evidência prevista                                              |

@@ -1,5 +1,5 @@
 export async function waitFor<T>(
-  poll: () => Promise<T | undefined>,
+  poll: () => T | undefined | Promise<T | undefined>,
   description: string,
   timeout = 10_000,
 ): Promise<T> {

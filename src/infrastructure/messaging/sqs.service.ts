@@ -13,7 +13,11 @@ export class SqsService implements OnModuleDestroy {
 
   async checkQueues(): Promise<void> {
     const signal = AbortSignal.timeout(2_000);
-    const queueUrls = [this.config.SQS_WAGER_QUEUE_URL, this.config.SQS_WAGER_DLQ_URL];
+    const queueUrls = [
+      this.config.SQS_WAGER_QUEUE_URL,
+      this.config.SQS_WAGER_DLQ_URL,
+      this.config.SQS_EVENT_QUEUE_URL,
+    ];
     const results = await Promise.all(
       queueUrls.map((QueueUrl) =>
         this.client.send(

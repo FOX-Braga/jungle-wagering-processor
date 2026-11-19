@@ -52,7 +52,10 @@ async function provision(config: AppConfig): Promise<void> {
   const client = createSqsClient(config);
   try {
     await provisionQueues(client, config);
-    console.log(JSON.stringify({ status: "ok", queues: [WAGER_QUEUE_NAME, WAGER_DLQ_NAME] }));
+    const eventName = new URL(config.SQS_EVENT_QUEUE_URL).pathname.split("/").at(-1);
+    console.log(
+      JSON.stringify({ status: "ok", queues: [WAGER_QUEUE_NAME, WAGER_DLQ_NAME, eventName] }),
+    );
   } catch (error) {
     throw new BootstrapError("Falha ao provisionar filas. Verifique o endpoint e o MiniStack.", {
       cause: error,

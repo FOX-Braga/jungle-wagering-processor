@@ -12,12 +12,34 @@ x-app-environment: &app-environment
   SQS_ENDPOINT: http://sqs:4566
   SQS_WAGER_QUEUE_URL: http://sqs:4566/${AWS_ACCESS_KEY_ID:-000000000000}/wager-transactions.fifo
   SQS_WAGER_DLQ_URL: http://sqs:4566/${AWS_ACCESS_KEY_ID:-000000000000}/wager-transactions-dlq.fifo
+  SQS_EVENT_QUEUE_URL: http://sqs:4566/${AWS_ACCESS_KEY_ID:-000000000000}/${SQS_EVENT_QUEUE_NAME:-wager-events}
+  SQS_POLL_WAIT_SECONDS: ${SQS_POLL_WAIT_SECONDS:-10}
+  SQS_VISIBILITY_TIMEOUT_SECONDS: ${SQS_VISIBILITY_TIMEOUT_SECONDS:-30}
+  SQS_MAX_RECEIVE_COUNT: ${SQS_MAX_RECEIVE_COUNT:-3}
+  SQS_CONSUMER_CONCURRENCY: ${SQS_CONSUMER_CONCURRENCY:-4}
+  SQS_CONSUMER_NAME: ${SQS_CONSUMER_NAME:-wager-processor}
+  OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-25}
+  OUTBOX_POLL_INTERVAL_MS: ${OUTBOX_POLL_INTERVAL_MS:-1000}
+  OUTBOX_MAX_ATTEMPTS: ${OUTBOX_MAX_ATTEMPTS:-10}
+  OUTBOX_LEASE_SECONDS: ${OUTBOX_LEASE_SECONDS:-30}
+  REFERENCE_WORKER_BATCH_SIZE: ${REFERENCE_WORKER_BATCH_SIZE:-25}
+  REFERENCE_WORKER_INTERVAL_MS: ${REFERENCE_WORKER_INTERVAL_MS:-1000}
+  REFERENCE_MAX_ATTEMPTS: ${REFERENCE_MAX_ATTEMPTS:-10}
 
 x-app: &app
   image: jungle-wagering-processor:0.1.0
   build: .
   environment: *app-environment
   networks: [backend]
+
+x-worker: &worker
+  <<: *app
+  profiles: [workers]
+  init: true
+  stop_grace_period: 65s
+  depends_on:
+    setup:
+      condition: service_completed_successfully
 
 services:
   postgres:
@@ -93,6 +115,18 @@ services:
       interval: 5s
       timeout: 4s
       retries: 15
+
+  consumer:
+    <<: *worker
+    command: ["bun", "--no-env-file", "dist/src/worker.main.js", "consumer"]
+
+  outbox:
+    <<: *worker
+    command: ["bun", "--no-env-file", "dist/src/worker.main.js", "outbox"]
+
+  references:
+    <<: *worker
+    command: ["bun", "--no-env-file", "dist/src/worker.main.js", "references"]
 
 networks:
   backend:

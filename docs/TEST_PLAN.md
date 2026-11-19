@@ -37,14 +37,14 @@ A suíte da Fase 2 executa os quatro cenários financeiros do roteiro, a matriz 
 - `test:http-contract` seleciona o cenário que compara schemas OpenAPI com entradas e respostas reais.
 - Os testes de integração das fases anteriores continuam disponíveis em `test:integration`.
 
-## Verificações nas próximas etapas
+## Etapa 06 — Mensageria e recuperação distribuída
 
-| Área                    | Evidência                                                                                                                                                                                                |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Concorrência            | Estender as provas HTTP de três processos para consumidores e publicadores concorrentes de SQS.                                                                                                          |
-| Idempotência HTTP e SQS | Repetir o comando nos dois transportes e após reinício. Validar saldo histórico e conflito com hash divergente.                                                                                          |
-| Referências             | Exercitar entrega pelo SQS, retomada via agendamento e rejeição por prazo com emissão dos eventos.                                                                                                       |
-| Recuperação             | Injetar falha antes do commit, depois do commit antes do ack e depois da publicação antes da marcação. Parar e recuperar PostgreSQL e SQS. Confirmar ausência de efeito duplicado e entrega recuperável. |
-| Auditoria e operação    | Reconciliar no mesmo snapshot, reportar divergência sem correção silenciosa e verificar logs e métricas dos cenários anteriores.                                                                         |
+- `test:messaging` roda com PostgreSQL, MiniStack e processos filhos. Exercita idempotência HTTP/SQS nas duas ordens e simultaneamente, rejeições terminais, DLQ, falha de conexão, publicação concorrente e referências fora de ordem.
+- `test:inbox`, `test:dlq` e `test:outbox` selecionam esses fluxos por subsistema.
+- `test:recovery` comprova rollback antes do commit, replay após commit e antes do ACK, falha de ACK, perda de conexão durante a transação, renovação de visibilidade e drenagem.
+- `test:distributed` inclui três consumers SQS independentes e 50 entregas equivalentes, além dos processos HTTP da etapa anterior.
+- `demo:resilience` roda um cenário com consumidores e publishers reiniciados em pontos controlados e imprime o relatório de reconciliação.
+
+Os testes de mensageria criam bancos e filas com nomes únicos e removem somente esses recursos. [Runbook](FAILURE_SCENARIOS.md) · [Relatório da Fase 6](PHASE_6_REPORT.md)
 
 Cada teste financeiro deve comparar, em representação exata, o saldo materializado com créditos menos débitos reconstruídos a partir do ledger.

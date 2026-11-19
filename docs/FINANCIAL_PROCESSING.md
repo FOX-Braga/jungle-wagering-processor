@@ -176,7 +176,7 @@ flowchart TD
     B -->|Regra aceita| F["Persistir resultado e efeitos aplicáveis"]
 ```
 
-`FAILED` permanece um estado terminal suportado pelo domínio e pelo schema. A decisão durável de falha técnica após esgotar tentativas pertence à fase que implementa o worker e sua política de recuperação.
+`FAILED` permanece um estado terminal suportado pelo domínio e pelo schema. Quando falhas de infraestrutura esgotam as tentativas do consumer SQS, o redrive registra a mensagem original na DLQ. A decisão de negócio só é persistida quando a transação financeira conclui a avaliação.
 
 ## Eventos e invariantes
 
@@ -191,6 +191,6 @@ Os eventos usam payload versão 1 e ID estável gerado na gravação. A correla�
 
 O saldo materializado é reconciliável com créditos menos débitos. O ledger é append-only, tem um lançamento por operação com efeito e uma entrada por versão da carteira. O saldo permanece não negativo. O PostgreSQL valida cadeia de saldos, precisão, identidade, reversões e a existência do lançamento para o movimento no commit. Os testes sob falha verificam conjuntamente carteira, transações, ledger, inbox e outbox. Consulte os comandos e o ambiente reproduzível no [README](../README.md).
 
-## Integrações das próximas fases
+## Entradas e processamento assíncrono
 
-A Fase 5 conecta os casos de uso à API REST, ao cabeçalho de idempotência, aos filtros de exceção e à documentação OpenAPI. Os testes distribuídos exercitam três processos independentes sobre o mesmo PostgreSQL. A Fase 6 integra o consumidor SQS, o ack após commit, o agendamento e prazo de referências e a publicação da outbox. [Contrato HTTP](API_CONTRACT.md) · [Concorrência distribuída](DISTRIBUTED_CONCURRENCY.md)
+A API REST e o consumer SQS compartilham os casos de uso. O consumer confirma depois do commit da Inbox e do efeito financeiro. A agenda de referências é preservada no PostgreSQL e o publisher entrega eventos confirmados à fila de saída. [Contrato HTTP](API_CONTRACT.md) · [Concorrência distribuída](DISTRIBUTED_CONCURRENCY.md) · [Arquitetura de mensageria](MESSAGING_ARCHITECTURE.md)

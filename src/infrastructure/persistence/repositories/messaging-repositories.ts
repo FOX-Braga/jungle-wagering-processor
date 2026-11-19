@@ -97,6 +97,7 @@ export class MikroOutboxRepository implements OutboxRepository {
       {
         id: message.id,
         publishedAt: null,
+        parkedAt: null,
         claimOwner: claim?.owner ?? null,
         claimUntil: claim?.until ?? null,
       },
@@ -112,6 +113,7 @@ export class MikroOutboxRepository implements OutboxRepository {
       .select("*")
       .where({
         publishedAt: null,
+        parkedAt: null,
         [raw(dueAtExpression)]: { $lte: now },
         $or: [{ claimUntil: null }, { claimUntil: { $lte: now } }],
       })

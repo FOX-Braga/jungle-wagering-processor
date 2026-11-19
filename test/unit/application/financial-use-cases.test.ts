@@ -56,6 +56,8 @@ function unitPorts() {
       findByIdempotencyKey: absent,
       findPendingByReference: unexpected,
       findAppliedReversals: unexpected,
+      findDueReferences: unexpected,
+      scheduleReferenceRetry: unexpected,
       insert: unexpected,
       saveState: unexpected,
     },

@@ -1,6 +1,7 @@
-import type { FilterQuery } from "@mikro-orm/core";
+import { raw, type FilterQuery } from "@mikro-orm/core";
 import type { EntityManager } from "@mikro-orm/postgresql";
 import type {
+  PendingReferenceCandidate,
   PersistedWager,
   WagerPersistenceDetails,
   WagerTransactionRepository,
@@ -13,6 +14,8 @@ import {
 import { WagerRow } from "../entities/financial-entities";
 import { toWager, wagerRow, wagerState } from "../mappers/financial-mappers";
 import { pageLimit } from "./page-limit";
+
+const referenceDueAt = "coalesce(reference_next_attempt_at, created_at)";
 
 export class MikroWagerRepository implements WagerTransactionRepository {
   constructor(private readonly em: EntityManager) {}
@@ -62,6 +65,31 @@ export class MikroWagerRepository implements WagerTransactionRepository {
     return rows.map((row) => toWager(row).transaction);
   }
 
+  findDueReferences(now: Date, limit: number): Promise<PendingReferenceCandidate[]> {
+    return this.em
+      .createQueryBuilder(WagerRow)
+      .select(["id", "walletId", "providerId", "referenceAttempts"])
+      .where({
+        status: WagerTransactionStatus.PendingReference,
+        [raw(referenceDueAt)]: { $lte: now },
+      })
+      .orderBy({ [raw(referenceDueAt)]: "asc", id: "asc" })
+      .limit(pageLimit(limit))
+      .execute<PendingReferenceCandidate[]>();
+  }
+
+  async scheduleReferenceRetry(id: string, attempts: number, dueAt: Date): Promise<void> {
+    const updated = await this.em.nativeUpdate(
+      WagerRow,
+      {
+        id,
+        status: WagerTransactionStatus.PendingReference,
+      },
+      { referenceAttempts: attempts, referenceNextAttemptAt: dueAt },
+    );
+    if (updated !== 1) throw new Error("Wager is no longer pending");
+  }
+
   async insert(
     transaction: WagerTransaction,
     details: WagerPersistenceDetails = {
@@ -78,7 +106,13 @@ export class MikroWagerRepository implements WagerTransactionRepository {
         id: transaction.id,
         payloadHash: transaction.payloadHash,
       },
-      wagerState(transaction, details),
+      {
+        ...wagerState(transaction, details),
+        referenceNextAttemptAt: null,
+        ...(details.referenceAttempts === undefined
+          ? {}
+          : { referenceAttempts: details.referenceAttempts }),
+      },
     );
     if (updated !== 1) throw new Error("Wager transaction or original hash not found");
   }

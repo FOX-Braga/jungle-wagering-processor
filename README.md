@@ -1,6 +1,6 @@
 # Jungle Wagering Processor
 
-Fundação do desafio técnico da Jungle Gaming para processamento distribuído de apostas. A Fase 1 entrega uma API de health, configuração validada, migrations, PostgreSQL e SQS local reproduzíveis. A Fase 2 implementa o [domínio financeiro](docs/DOMAIN_MODEL.md) com aritmética exata, ledger e eventos. A Fase 3 adiciona o [schema financeiro](docs/DATABASE_SCHEMA.md), repositórios MikroORM e proteção SQL do ledger. O [enunciado original](docs/challenge/README.original.md), a [arquitetura](ARCHITECTURE.md), a [matriz de requisitos](docs/REQUIREMENTS_MATRIX.md) e o [plano de testes](docs/TEST_PLAN.md) estão no repositório.
+Processador financeiro distribuído do desafio técnico da Jungle Gaming. A API REST e o consumidor SQS compartilham o mesmo [motor financeiro](docs/FINANCIAL_PROCESSING.md), com saldo decimal exato, ledger imutável e idempotência no PostgreSQL. A Fase 6 coloca em operação a Inbox transacional, a publicação concorrente pela Outbox e a recuperação de referências fora de ordem. [Enunciado original](docs/challenge/README.original.md) · [Arquitetura](ARCHITECTURE.md) · [Matriz de requisitos](docs/REQUIREMENTS_MATRIX.md) · [Plano de testes](docs/TEST_PLAN.md)
 
 ## Stack
 
@@ -50,8 +50,8 @@ A documentação OpenAPI está em `http://127.0.0.1:3000/docs`. O readiness devo
 ## Executar tudo no Docker Compose
 
 ```powershell
-docker compose --env-file .env.example up -d --build --wait
-docker compose --env-file .env.example ps -a
+docker compose --env-file .env.example --profile workers up -d --build --wait
+docker compose --env-file .env.example --profile workers ps -a
 ```
 
 O serviço `setup` deve terminar com código `0`. A API roda com o usuário `bun` e fica acessível nas mesmas rotas. Use uma única forma de execução da API por vez para evitar disputa da porta 3000. Com personalizações em `.env`, acrescente `--env-file .env` depois de `--env-file .env.example` nos comandos do Compose. Com `docker compose --env-file .env.example down`, os volumes continuam disponíveis para a próxima inicialização.
@@ -60,18 +60,21 @@ O serviço `setup` deve terminar com código `0`. A API roda com o usuário `bun
 
 Os scripts carregam a configuração padrão de `.env.example`. Crie um `.env` local para sobrescrever apenas as variáveis necessárias. Valores exportados na sessão prevalecem. A integração carrega `.env.example` e `.env.test`, e usa `TEST_DATABASE_URL` como conexão de manutenção para os bancos descartáveis. Use os exemplos como credenciais descartáveis exclusivas de desenvolvimento.
 
-| Variável                                                             | Uso                                                                                                  |
-| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `NODE_ENV`, `PORT`, `LOG_LEVEL`                                      | Ambiente, porta HTTP do host e nível de log estruturado                                              |
-| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT` | Inicialização do container e porta publicada                                                         |
-| `DATABASE_URL`                                                       | DSN da API e dos scripts no host. Padrão em `127.0.0.1:5434`.                                        |
-| `TEST_DATABASE_URL`                                                  | Conexão de manutenção dos testes SQL, apontada para o Compose na porta `5434`.                       |
-| `DATABASE_URL_DOCKER`                                                | Sobrescrita opcional do DSN usado pelos containers. Padrão com serviço `postgres:5432`.              |
-| `SQS_PORT`, `SQS_ENDPOINT`                                           | Porta publicada e endpoint do host. Padrão em `127.0.0.1:4567`. Internamente Compose usa `sqs:4566`. |
-| `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`           | Região e credenciais locais. O identificador numérico de 12 dígitos é a conta do MiniStack.          |
-| `SQS_WAGER_QUEUE_URL`, `SQS_WAGER_DLQ_URL`                           | URLs das duas filas na mesma origem do endpoint e no caminho da conta configurada                    |
+| Variável                                                                           | Uso                                                                                                   |
+| ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`, `PORT`, `LOG_LEVEL`                                                    | Ambiente, porta HTTP do host e nível de log estruturado                                               |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT`               | Inicialização do container e porta publicada                                                          |
+| `DATABASE_URL`                                                                     | DSN da API e dos scripts no host. Padrão em `127.0.0.1:5434`.                                         |
+| `TEST_DATABASE_URL`                                                                | Conexão de manutenção dos testes SQL, apontada para o Compose na porta `5434`.                        |
+| `DATABASE_URL_DOCKER`                                                              | Sobrescrita opcional do DSN usado pelos containers. Padrão com serviço `postgres:5432`.               |
+| `SQS_PORT`, `SQS_ENDPOINT`                                                         | Porta publicada e endpoint do host. Padrão em `127.0.0.1:4567`. Internamente Compose usa `sqs:4566`.  |
+| `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`                         | Região e credenciais locais. O identificador numérico de 12 dígitos é a conta do MiniStack.           |
+| `SQS_WAGER_QUEUE_URL`, `SQS_WAGER_DLQ_URL`, `SQS_EVENT_QUEUE_URL`                  | Filas na mesma origem do endpoint e no caminho da conta configurada. A saída padrão é `wager-events`. |
+| `SQS_POLL_WAIT_SECONDS`, `SQS_VISIBILITY_TIMEOUT_SECONDS`, `SQS_MAX_RECEIVE_COUNT` | Long poll, visibilidade e limite de recebimentos antes do redrive                                     |
+| `SQS_CONSUMER_CONCURRENCY`, `SQS_CONSUMER_NAME`                                    | Slots por instância e nome lógico compartilhado pelas réplicas na Inbox                               |
+| `OUTBOX_*`, `REFERENCE_*`                                                          | Lotes, intervalos, limites de tentativas e duração do lease de publicação                             |
 
-Ao trocar a porta publicada do PostgreSQL, ajuste `DATABASE_URL`. Ao trocar porta ou conta do MiniStack, ajuste o endpoint e as duas URLs de fila do host. As URLs internas usam os serviços DNS do Compose. Em DSNs com caracteres especiais, use _percent encoding_ e ajuste `DATABASE_URL_DOCKER` para o Compose, se necessário.
+Ao trocar a porta publicada do PostgreSQL, ajuste `DATABASE_URL`. Ao trocar porta ou conta do MiniStack, ajuste o endpoint e as URLs de entrada e DLQ do host. A URL padrão de eventos é derivada do endpoint e da conta. Use `SQS_EVENT_QUEUE_NAME` no Compose para personalizar a fila standard interna. Em DSNs com caracteres especiais, use _percent encoding_ e ajuste `DATABASE_URL_DOCKER` para o Compose, se necessário.
 
 ## API financeira e Postman
 
@@ -96,7 +99,16 @@ bun run db:migrate:status
 
 ## SQS local
 
-O MiniStack atende às operações SQS da fundação sem licença paga. A fila `wager-transactions.fifo` tem deduplicação por conteúdo, visibilidade de 30 segundos, long polling de 10 segundos e encaminhamento à `wager-transactions-dlq.fifo` após três recebimentos sem exclusão. A suíte usa filas temporárias para cenários com mensagens. A configuração e o estado dos emuladores usam volumes do Compose.
+O MiniStack fornece as filas FIFO de solicitações e DLQ e a fila standard `wager-events`. A Inbox confirma a operação após o commit SQL. O redrive padrão move mensagens após três recebimentos sem exclusão. Para iniciar os workers no host, abra um terminal por comando após o provisionamento.
+
+```powershell
+bun run worker:consumer
+bun run worker:outbox
+bun run worker:references
+bun run queues:inspect
+```
+
+O fluxo, o contrato de mensagens e a recuperação de eventos estacionados estão documentados. [Arquitetura de mensageria](docs/MESSAGING_ARCHITECTURE.md) · [Runbook](docs/FAILURE_SCENARIOS.md)
 
 Para listar filas com AWS CLI:
 
@@ -125,9 +137,14 @@ bun --env-file=.env.example scripts/bootstrap/infra.ts provision
 bun run test:integration
 bun run test:e2e
 bun run test:distributed
+bun run test:messaging
+bun run test:recovery
+bun run demo:resilience
 ```
 
 `provision` aplica as migrations e garante as filas de teste. `TEST_DATABASE_URL` identifica o PostgreSQL isolado na porta `5434`, e a conta deve ter permissão para criar bancos descartáveis. A suíte de persistência cria e limpa bancos com nomes gerados. Os testes de regressão usam PostgreSQL e MiniStack reais.
+
+As suítes de mensageria também podem rodar em partes com `test:inbox`, `test:outbox` e `test:dlq`. A demonstração pausa processos em pontos controlados, reinicia workers e imprime o resultado da reconciliação. [Demonstração de resiliência](docs/RESILIENCE_DEMO.md) · [Relatório da Fase 6](docs/PHASE_6_REPORT.md)
 
 Para executar uma parte isoladamente:
 

@@ -64,7 +64,9 @@ A avaliação usa API sem autenticação para priorizar os requisitos financeiro
 
 O PostgreSQL coordena as três instâncias independentes por lock de carteira e restrições únicas. A reconciliação consulta saldo e ledger no mesmo snapshot SQL. O shutdown fecha o listener, drena requisições aceitas e fecha as dependências dentro do prazo configurado. [Concorrência distribuída](docs/DISTRIBUTED_CONCURRENCY.md)
 
-## Integração HTTP e processamento SQS previsto
+## Integração HTTP e processamento SQS
+
+Os processos `consumer`, `outbox` e `references` usam o mesmo código financeiro da API. O consumer recebe `WagerTransactionRequested`, registra o recibo dentro da transação financeira e confirma a mensagem após o commit. O publisher envia à fila `wager-events` fora da transação SQL do claim. O worker de referências usa agenda persistida e o lock da carteira. [Arquitetura da mensageria](docs/MESSAGING_ARCHITECTURE.md) · [ADR 0003](docs/adr/0003-distributed-messaging.md)
 
 ```mermaid
 sequenceDiagram
@@ -94,5 +96,5 @@ O [modelo de domínio](docs/DOMAIN_MODEL.md) descreve as factories, os fluxos e 
 - `OPENING` é interno. Abertura positiva gera crédito e a versão inicial é 1. `LOSS` registra o resultado sem lançamento ou avanço de versão.
 - `WIN` aceita referência opcional a uma `BET` processada. `REFUND` e `ROLLBACK` exigem referência íntegra e valor integral. As referências devem corresponder a provedor, jogador, wallet, moeda e rodada.
 - A decisão inicial trata `REFUND` e `ROLLBACK` diretos da mesma `BET` como alternativas para evitar dois créditos. `ROLLBACK` da própria `REFUND` continua permitido. Trata-se de uma interpretação adicional à proteção mínima do enunciado por tipo.
-- Referência ausente fica pendente com snapshot persistido. Backoff, prazo e rejeição por `REFERENCE_NOT_FOUND` são responsabilidades do worker da Fase 6.
+- Referência ausente fica pendente com snapshot persistido. O worker agenda novas verificações com backoff e registra `REFERENCE_NOT_FOUND` com evento de rejeição quando o limite acaba.
 - Códigos de negócio definidos incluem `INSUFFICIENT_FUNDS`, `REVERSAL_INSUFFICIENT_FUNDS`, `INVALID_REFERENCE`, `AMOUNT_MISMATCH`, `CURRENCY_MISMATCH` e `ALREADY_REVERSED`. Idempotência divergente é conflito. Falha transitória de dependência é indisponibilidade.
