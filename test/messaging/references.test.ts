@@ -5,6 +5,7 @@ import {
 } from "../../src/domain/wagering/wager-transaction";
 import { command } from "../helpers/application-fixtures";
 import { messagingFixture } from "../helpers/messaging-fixtures";
+import { waitFor } from "../helpers/wait-for";
 
 test("REFUND before BET and ROLLBACK before WIN resolve once with two reference workers", async () => {
   const f = await messagingFixture();
@@ -88,12 +89,27 @@ test("persists backoff and expires a missing reference with a single rejection e
       failureCode: "REFERENCE_NOT_FOUND",
     });
     const events = await f.app.manager.execute(({ outbox }) => outbox.findDue(new Date(), 100));
-    expect(
-      events.filter(
-        ({ eventType, aggregateId }) =>
-          eventType === "WagerTransactionRejected" && aggregateId === pending.transactionId,
-      ),
-    ).toHaveLength(1);
+    const rejections = events.filter(
+      ({ eventType, aggregateId }) =>
+        eventType === "WagerTransactionRejected" && aggregateId === pending.transactionId,
+    );
+    expect(rejections).toHaveLength(1);
+    const rejectionId = rejections[0]?.id;
+    const publisher = await f.start("outbox");
+    await publisher.waitLog("published", (log) => log.eventId === rejectionId);
+    const published = await waitFor(async () => {
+      const delivery = await f.receive(f.events);
+      if (!delivery?.Body || !delivery.ReceiptHandle) return undefined;
+      const event = JSON.parse(delivery.Body) as { eventId: string };
+      await f.delete(f.events, delivery.ReceiptHandle);
+      return event.eventId === rejectionId ? event : undefined;
+    }, "rejection event for the exhausted reference");
+    expect(published).toMatchObject({
+      eventType: "WagerTransactionRejected",
+      version: 1,
+      aggregateId: pending.transactionId,
+      data: { failureCode: "REFERENCE_NOT_FOUND" },
+    });
     expect(await f.reconcile.execute(wallet.id)).toMatchObject({
       consistent: true,
       checkedEntries: 1,

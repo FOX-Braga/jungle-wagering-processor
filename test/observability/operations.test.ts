@@ -125,6 +125,28 @@ describe("operational telemetry", () => {
     }
   });
 
+  test("counts a reference resolution without treating its scheduled retry as a duplicate", async () => {
+    const metrics = new Metrics("references-1", "references");
+    const pending: ProcessWagerResult = {
+      transactionId: "pending-wager",
+      status: Status.PendingReference,
+      balance: { amount: "100.00", currency: "BRL" },
+      walletVersion: 1,
+      idempotentReplay: true,
+    };
+    await observeWager(metrics, "references", () => Promise.resolve(pending));
+    await observeWager(metrics, "references", () =>
+      Promise.resolve({ ...pending, status: Status.Processed, idempotentReplay: false }),
+    );
+
+    const observed = metrics.snapshot().metrics;
+    expect(observed.wager_idempotency_duplicates_total).toBeUndefined();
+    expect(observed.wager_transactions_total).toEqual([
+      { type: "counter", labels: { source: "references", status: "PROCESSED" }, value: 1 },
+    ]);
+    expect(observed.wager_processing_duration_seconds).toMatchObject([{ count: 2 }]);
+  });
+
   test("validates correlation and causation with a legacy message ID fallback", () => {
     const envelope = {
       messageId: "message-1",

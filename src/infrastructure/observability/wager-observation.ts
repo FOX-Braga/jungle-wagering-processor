@@ -12,12 +12,12 @@ export async function observeWager<T extends ProcessWagerResult | undefined>(
   const started = performance.now();
   try {
     const result = await operationMetrics.run({ metrics, source }, execute);
+    if (source === "references" && result?.status === WagerTransactionStatus.PendingReference) {
+      return result;
+    }
     if (result?.idempotentReplay) {
       metrics.record("wager_idempotency_duplicates_total", 1, source);
-    } else if (
-      result &&
-      !(source === "references" && result.status === WagerTransactionStatus.PendingReference)
-    ) {
+    } else if (result) {
       metrics.record("wager_transactions_total", 1, source, result.status);
     }
     return result;

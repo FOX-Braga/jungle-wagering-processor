@@ -4,3 +4,17 @@ values:
     value: ''
   - key: access_token
     value: ''
+  - key: providerId
+    value: ''
+  - key: playerId
+    value: ''
+  - key: externalTransactionId
+    value: ''
+  - key: idempotencyKey
+    value: ''
+  - key: refundExternalTransactionId
+    value: ''
+  - key: temporaryExternalId
+    value: ''
+  - key: temporaryKey
+    value: ''
